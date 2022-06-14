@@ -3,8 +3,12 @@ use xcb::x;
 fn main() {
     env_logger::init();
 
-    let (connection, preferred_display) =
-        xcb::Connection::connect(None).expect("Could not connect to X");
+    let (connection, preferred_display) = xcb::Connection::connect_with_extensions(
+        None,
+        &[xcb::Extension::Composite, xcb::Extension::Dri3],
+        &[],
+    )
+    .expect("Could not connect to X");
 
     log::info!("Connected to X");
 
@@ -24,8 +28,8 @@ fn main() {
     loop {
         match connection.wait_for_event() {
             Ok(xcb::Event::X(event)) => match event {
-                x::Event::KeyPress(key) => log::info!("key press: {:?}", key),
-                x::Event::KeyRelease(key) => log::info!("key release: {:?}", key),
+                x::Event::KeyPress(key) => log::debug!("Key press: {:?}", key.detail()),
+                x::Event::KeyRelease(key) => log::debug!("Key release: {:?}", key.detail()),
                 x::Event::KeymapNotify(_map) => (),
                 x::Event::ButtonPress(_button) => (),
                 x::Event::ButtonRelease(_button) => (),
@@ -38,14 +42,24 @@ fn main() {
                 x::Event::GraphicsExposure(_exposure) => (),
                 x::Event::NoExposure(_exposure) => (),
                 x::Event::VisibilityNotify(_visibility) => (),
-                x::Event::CreateNotify(_create) => (),
-                x::Event::DestroyNotify(_destroy) => (),
-                x::Event::UnmapNotify(_unmap) => (),
-                x::Event::MapNotify(_map) => (),
-                x::Event::MapRequest(_map) => (),
+                x::Event::CreateNotify(_create) => {
+                    log::debug!("Create notify");
+                }
+                x::Event::DestroyNotify(_destroy) => log::debug!("Destroy notify"),
+                x::Event::UnmapNotify(_unmap) => log::debug!("Unmap notify"),
+                x::Event::MapNotify(_map) => log::debug!("Map notify"),
+                x::Event::MapRequest(map) => {
+                    log::debug!("Map request");
+                    connection.send_request(&x::MapWindow {
+                        window: map.window(),
+                    });
+                    connection.flush().expect("Failed to flush X connection");
+                }
                 x::Event::ReparentNotify(_reparent) => (),
-                x::Event::ConfigureNotify(_configure) => (),
-                x::Event::ConfigureRequest(_configure) => (),
+                x::Event::ConfigureNotify(_configure) => log::debug!("Configure notify"),
+                x::Event::ConfigureRequest(_configure) => {
+                    log::debug!("Configure request");
+                }
                 x::Event::GravityNotify(_gravity) => (),
                 x::Event::ResizeRequest(_resize) => (),
                 x::Event::CirculateNotify(_circulate) => (),
@@ -58,10 +72,17 @@ fn main() {
                 x::Event::ClientMessage(_msg) => (),
                 x::Event::MappingNotify(_mapping) => (),
             },
+            Ok(xcb::Event::Shape(event)) => match event {
+                xcb::shape::Event::Notify(notify) => log::debug!("shape notify {:?}", notify),
+            },
+            Ok(xcb::Event::XFixes(event)) => match event {
+                xcb::xfixes::Event::SelectionNotify(_selection) => (),
+                xcb::xfixes::Event::CursorNotify(_cursor) => (),
+            },
             Ok(xcb::Event::Unknown(event)) => {
                 log::warn!("Received unrecognized event: {:?}", event);
             }
-            Err(e) => panic!("ERROR {:?}", e),
+            Err(e) => log::error!("ERROR {:?}", e),
         }
     }
 }
