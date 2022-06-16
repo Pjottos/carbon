@@ -1,3 +1,5 @@
+use crate::message::MessageStream;
+
 use nix::fcntl::{flock, FlockArg};
 use tokio::net::UnixListener;
 
@@ -73,5 +75,27 @@ impl Gateway {
         }
 
         panic!("Could not find a socket to bind to");
+    }
+
+    pub async fn listen(&self) {
+        loop {
+            match self.listener.accept().await {
+                Ok((stream, _addr)) => {
+                    let stream = MessageStream::new(stream);
+                    tokio::spawn(async move {
+                        loop {
+                            let r = stream.receive().await;
+                            if let Ok(Some(r)) = r {
+                                log::info!("Received: {:?}", r);
+                            } else {
+                                log::info!("Dropping client");
+                                break;
+                            }
+                        }
+                    });
+                }
+                Err(e) => log::error!("Failed to accept socket connection: {}", e),
+            }
+        }
     }
 }
