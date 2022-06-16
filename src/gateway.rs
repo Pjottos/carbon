@@ -84,12 +84,19 @@ impl Gateway {
                     let stream = MessageStream::new(stream);
                     tokio::spawn(async move {
                         loop {
-                            let r = stream.receive().await;
-                            if let Ok(Some(r)) = r {
-                                log::info!("Received: {:?}", r);
-                            } else {
-                                log::info!("Dropping client");
-                                break;
+                            match stream.receive().await {
+                                Ok(Some(r)) => {
+                                    log::debug!("Received: {:?}", r);
+                                }
+                                Ok(None) => {
+                                    log::debug!("Client disconnected");
+                                    break;
+                                }
+                                Err(e) => {
+                                    log::error!("Error while receiving message: {}", e);
+                                    log::error!("Dropping this client");
+                                    break;
+                                }
                             }
                         }
                     });

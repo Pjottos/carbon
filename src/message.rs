@@ -2,7 +2,6 @@ use atomic_refcell::AtomicRefCell;
 use byteorder::{NativeEndian, ReadBytesExt};
 use nix::{
     errno::Errno,
-    libc,
     sys::socket::{recvmsg, ControlMessageOwned, MsgFlags},
 };
 use tokio::{io, net::UnixStream};
@@ -13,11 +12,18 @@ const MAX_FDS_OUT: usize = 28;
 
 /// Error returned when an invalid message was received.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct InvalidMessage;
+pub enum MessageError {
+    TooLarge,
+    BadFormat,
+}
 
-impl From<InvalidMessage> for io::Error {
-    fn from(_: InvalidMessage) -> Self {
-        io::Error::new(io::ErrorKind::InvalidData, "Invalid wayland message")
+impl From<MessageError> for io::Error {
+    fn from(e: MessageError) -> Self {
+        let text = match e {
+            MessageError::TooLarge => "Wayland message did not fit in buffer",
+            MessageError::BadFormat => "Wayland message had incorrect format",
+        };
+        io::Error::new(io::ErrorKind::InvalidData, text)
     }
 }
 
@@ -49,7 +55,7 @@ impl MessageStream {
             let raw_fd = self.stream.as_raw_fd();
             let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
             let mut receive_buf = self.receive_buf.borrow_mut();
-            let (mut vecs, vec_count) = receive_buf.io_vecs_mut();
+            let (mut vecs, vec_count) = receive_buf.io_vecs_mut()?;
             // Can't add directly to receive_buf because it has a live mutable borrow
             let mut new_fds = vec![];
             let res = self.stream.try_io(io::Interest::READABLE, || loop {
@@ -88,7 +94,7 @@ impl MessageStream {
                             .map_err(|e| e.into());
                     }
 
-                    receive_buf.grow(count)?;
+                    receive_buf.grow(count);
                     receive_buf.fds.append(&mut new_fds);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -105,62 +111,71 @@ struct MessageBuf {
     buf: [u8; Self::BUF_SIZE],
     head: usize,
     tail: usize,
+    len: usize,
     fds: Vec<RawFd>,
 }
 
 impl MessageBuf {
     const BUF_SIZE: usize = 4096;
 
+    #[inline]
     fn new() -> Self {
         Self {
             buf: [0; Self::BUF_SIZE],
             head: 0,
             tail: 0,
+            len: 0,
             fds: vec![],
         }
     }
 
-    fn io_vecs_mut(&mut self) -> ([IoSliceMut; 2], usize) {
-        let (a, b) = self.buf.split_at_mut(self.head);
+    fn is_full(&self) -> bool {
+        self.len == Self::BUF_SIZE
+    }
 
-        if self.head < self.tail {
-            let a = &mut [];
-            let b = &mut b[..self.tail];
-            ([IoSliceMut::new(b), IoSliceMut::new(a)], 1)
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn io_vecs_mut(&mut self) -> Result<([IoSliceMut; 2], usize), MessageError> {
+        if self.is_full() {
+            Err(MessageError::TooLarge)
+        } else if self.is_empty() {
+            self.head = 0;
+            self.tail = 0;
+            Ok((
+                [IoSliceMut::new(&mut self.buf), IoSliceMut::new(&mut [])],
+                1,
+            ))
         } else if self.tail == 0 {
-            let a = &mut [];
-            ([IoSliceMut::new(b), IoSliceMut::new(a)], 1)
+            let a = &mut self.buf[self.head..];
+            Ok(([IoSliceMut::new(a), IoSliceMut::new(&mut [])], 1))
+        } else if self.head < self.tail {
+            let a = &mut self.buf[self.head..self.tail];
+            Ok(([IoSliceMut::new(a), IoSliceMut::new(&mut [])], 1))
         } else {
-            let a = &mut a[..self.tail];
-            ([IoSliceMut::new(b), IoSliceMut::new(a)], 2)
+            let (b, a) = self.buf.split_at_mut(self.head);
+            let b = &mut b[..self.tail];
+            Ok(([IoSliceMut::new(a), IoSliceMut::new(b)], 2))
         }
     }
 
-    fn grow(&mut self, count: usize) -> io::Result<()> {
-        let new_head = self.head + count;
-        if new_head - self.tail >= Self::BUF_SIZE {
-            Err(io::Error::from_raw_os_error(libc::EOVERFLOW))
-        } else {
-            self.head = new_head % Self::BUF_SIZE;
-            Ok(())
-        }
+    fn grow(&mut self, count: usize) {
+        assert!(self.len + count <= Self::BUF_SIZE);
+        self.head = (self.head + count) % Self::BUF_SIZE;
+        self.len += count;
     }
 
-    fn shrink(&mut self, count: usize) -> io::Result<()> {
-        let new_tail = self.tail + count;
-        if self.head - new_tail >= Self::BUF_SIZE {
-            Err(io::Error::from_raw_os_error(libc::EOVERFLOW))
-        } else {
-            self.tail = new_tail % Self::BUF_SIZE;
-            Ok(())
-        }
+    fn shrink(&mut self, count: usize) {
+        self.tail = (self.tail + count) % Self::BUF_SIZE;
+        self.len = self.len.saturating_sub(count);
     }
 
-    fn try_deserialize(&mut self) -> Option<Result<(), InvalidMessage>> {
+    fn try_deserialize(&mut self) -> Option<Result<(), MessageError>> {
         let mut reader = RingBufReader {
             buf: &self.buf,
-            head: self.head,
             tail: self.tail,
+            count: self.len,
         };
 
         let object_id = reader.read_u32::<NativeEndian>().ok()?;
@@ -169,67 +184,57 @@ impl MessageBuf {
         let opcode = header & 0xFFFF;
 
         if msg_size < 8 || msg_size % 4 != 0 {
-            return Some(Err(InvalidMessage));
+            return Some(Err(MessageError::BadFormat));
         }
 
-        log::info!("object_id : {}", object_id);
-        log::info!("opcode    : {}", opcode);
-        log::info!("msg_size  : {}", msg_size);
+        log::debug!("object_id : {}", object_id);
+        log::debug!("opcode    : {}", opcode);
+        log::debug!("msg_size  : {}", msg_size);
 
-        if self.len() >= msg_size {
+        if self.len >= msg_size {
             // TODO: deserialize message
             for _ in (8..msg_size).step_by(4) {
-                log::info!(
+                log::debug!(
                     "payload   : {:08x}",
                     reader.read_u32::<NativeEndian>().ok()?
                 );
             }
 
-            // We read the entire payload, shrinking should not fail
-            self.shrink(msg_size).unwrap();
+            self.shrink(msg_size);
+            self.fds.clear();
 
             Some(Ok(()))
         } else {
             None
         }
     }
-
-    fn len(&self) -> usize {
-        self.head.wrapping_sub(self.tail) % Self::BUF_SIZE
-    }
 }
 
 struct RingBufReader<'a> {
     buf: &'a [u8; MessageBuf::BUF_SIZE],
-    head: usize,
     tail: usize,
+    count: usize,
 }
 
 impl<'a> std::io::Read for RingBufReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.head == self.tail {
+        if self.count == 0 {
             return Ok(0);
         }
 
         let (a, b) = self.buf.split_at(self.tail);
+        let count = self.count.min(buf.len());
 
-        if self.tail < self.head {
-            let count = (self.head - self.tail).min(buf.len());
-
+        if count <= b.len() {
             buf[..count].copy_from_slice(&b[..count]);
-            self.tail += count;
-
-            Ok(count)
         } else {
-            let count = (b.len() + self.head).min(buf.len());
-            let b_count = count.min(b.len());
-            buf[..b_count].copy_from_slice(&b[..b_count]);
-            if b_count < count {
-                buf[b_count..count].copy_from_slice(&a[..count - b_count]);
-            }
-            self.tail = (self.tail + count) % MessageBuf::BUF_SIZE;
-
-            Ok(count)
+            buf[..b.len()].copy_from_slice(b);
+            buf[b.len()..count].copy_from_slice(&a[..count - b.len()]);
         }
+
+        self.tail = (self.tail + count) % MessageBuf::BUF_SIZE;
+        self.count -= count;
+
+        Ok(count)
     }
 }
