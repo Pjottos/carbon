@@ -1,2 +1,2 @@
 [workspace]
-members = ["carbon"]
+members = ["carbon", "protocol-scanner"]
