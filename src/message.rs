@@ -1,4 +1,5 @@
 use atomic_refcell::AtomicRefCell;
+use byteorder::{NativeEndian, ReadBytesExt};
 use nix::{
     errno::Errno,
     libc,
@@ -132,12 +133,72 @@ impl MessageBuf {
     }
 
     fn try_deserialize(&mut self) -> Option<()> {
-        log::info!("{:02x?}", &self.buf[..self.head]);
-        if self.head > 0 {
-            self.head = 0;
+        let mut reader = RingBufReader {
+            buf: &self.buf,
+            head: self.head,
+            tail: self.tail,
+        };
+
+        let object_id = reader.read_u32::<NativeEndian>().ok()?;
+        let header = reader.read_u32::<NativeEndian>().ok()?;
+        let msg_size = (header >> 16) as usize;
+        let opcode = header & 0xFFFF;
+
+        log::info!("object_id : {}", object_id);
+        log::info!("opcode    : {}", opcode);
+        log::info!("msg_size  : {}", msg_size);
+
+        if self.len() >= msg_size {
+            // TODO: deserialize message
+            for _ in (8..msg_size).step_by(4) {
+                log::info!(
+                    "payload   : {:08x}",
+                    reader.read_u32::<NativeEndian>().ok()?
+                );
+            }
+
             Some(())
         } else {
             None
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.head.wrapping_sub(self.tail) % Self::BUF_SIZE
+    }
+}
+
+struct RingBufReader<'a> {
+    buf: &'a [u8; MessageBuf::BUF_SIZE],
+    head: usize,
+    tail: usize,
+}
+
+impl<'a> std::io::Read for RingBufReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.head == self.tail {
+            return Ok(0);
+        }
+
+        let (a, b) = self.buf.split_at(self.tail);
+
+        if self.tail < self.head {
+            let count = (self.head - self.tail).min(buf.len());
+
+            buf[..count].copy_from_slice(&b[..count]);
+            self.tail += count;
+
+            Ok(count)
+        } else {
+            let count = (b.len() + self.head).min(buf.len());
+            let b_count = count.min(b.len());
+            buf[..b_count].copy_from_slice(&b[..b_count]);
+            if b_count < count {
+                buf[b_count..count].copy_from_slice(&a[..count - b_count]);
+            }
+            self.tail = (self.tail + count) % MessageBuf::BUF_SIZE;
+
+            Ok(count)
         }
     }
 }
