@@ -11,6 +11,16 @@ use std::{io::IoSliceMut, os::unix::prelude::*};
 
 const MAX_FDS_OUT: usize = 28;
 
+/// Error returned when an invalid message was received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InvalidMessage;
+
+impl From<InvalidMessage> for io::Error {
+    fn from(_: InvalidMessage) -> Self {
+        io::Error::new(io::ErrorKind::InvalidData, "Invalid wayland message")
+    }
+}
+
 pub struct MessageStream {
     stream: UnixStream,
     receive_buf: AtomicRefCell<MessageBuf>,
@@ -26,6 +36,14 @@ impl MessageStream {
 
     pub async fn receive(&self) -> io::Result<Option<()>> {
         loop {
+            {
+                let mut receive_buf = self.receive_buf.borrow_mut();
+                let deserialized = receive_buf.try_deserialize();
+                if deserialized.is_some() {
+                    return deserialized.transpose().map_err(|e| e.into());
+                }
+            }
+
             self.stream.readable().await?;
 
             let raw_fd = self.stream.as_raw_fd();
@@ -64,7 +82,10 @@ impl MessageStream {
                 Ok(count) => {
                     if count == 0 {
                         // Stream is closed, one last try to get a message
-                        return Ok(receive_buf.try_deserialize());
+                        return receive_buf
+                            .try_deserialize()
+                            .transpose()
+                            .map_err(|e| e.into());
                     }
 
                     receive_buf.grow(count)?;
@@ -76,13 +97,6 @@ impl MessageStream {
                 }
                 Err(e) => return Err(e),
             }
-
-            let deserialized = receive_buf.try_deserialize();
-            if deserialized.is_some() {
-                return Ok(deserialized);
-            }
-
-            // Not enough data yet, continue reading
         }
     }
 }
@@ -132,7 +146,17 @@ impl MessageBuf {
         }
     }
 
-    fn try_deserialize(&mut self) -> Option<()> {
+    fn shrink(&mut self, count: usize) -> io::Result<()> {
+        let new_tail = self.tail + count;
+        if self.head - new_tail >= Self::BUF_SIZE {
+            Err(io::Error::from_raw_os_error(libc::EOVERFLOW))
+        } else {
+            self.tail = new_tail % Self::BUF_SIZE;
+            Ok(())
+        }
+    }
+
+    fn try_deserialize(&mut self) -> Option<Result<(), InvalidMessage>> {
         let mut reader = RingBufReader {
             buf: &self.buf,
             head: self.head,
@@ -143,6 +167,10 @@ impl MessageBuf {
         let header = reader.read_u32::<NativeEndian>().ok()?;
         let msg_size = (header >> 16) as usize;
         let opcode = header & 0xFFFF;
+
+        if msg_size < 8 || msg_size % 4 != 0 {
+            return Some(Err(InvalidMessage));
+        }
 
         log::info!("object_id : {}", object_id);
         log::info!("opcode    : {}", opcode);
@@ -157,7 +185,10 @@ impl MessageBuf {
                 );
             }
 
-            Some(())
+            // We read the entire payload, shrinking should not fail
+            self.shrink(msg_size).unwrap();
+
+            Some(Ok(()))
         } else {
             None
         }
