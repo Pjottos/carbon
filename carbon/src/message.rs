@@ -201,7 +201,6 @@ impl MessageBuf {
             }
 
             self.shrink(msg_size);
-            self.fds.clear();
 
             Some(Ok(()))
         } else {
