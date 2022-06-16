@@ -1,13 +1,2 @@
-[package]
-name = "carbon"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-tokio = { version = "1", features = ["rt", "net", "macros"] }
-nix = { version = "0.24", features = ["fs", "uio"] }
-
-log = "0.4"
-env_logger = "0.9"
-atomic_refcell = "0.1"
-byteorder = "1"
+[workspace]
+members = ["carbon"]
