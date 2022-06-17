@@ -5,6 +5,10 @@ use quick_xml::{
 
 use std::{fs::File, io::BufReader, path::Path};
 
+mod emit;
+
+pub use emit::emit_protocol;
+
 pub struct ProtocolParser {
     reader: Reader<BufReader<File>>,
     protocol: Option<Protocol>,
@@ -181,7 +185,7 @@ impl ProtocolParser {
             match empty.name() {
                 b"arg" => {
                     let arg =
-                        Self::create_arg(&self.reader, self.cur_interface.as_ref().unwrap(), empty);
+                        Self::create_arg(&self.reader, empty);
                     cur_callable.args.push(arg);
                     true
                 }
@@ -304,7 +308,6 @@ impl ProtocolParser {
 
     fn create_arg(
         reader: &Reader<BufReader<File>>,
-        cur_interface: &Interface,
         start: &BytesStart,
     ) -> Argument {
         let mut name = None;
@@ -327,9 +330,9 @@ impl ProtocolParser {
                 b"enum" => {
                     let full = attribute.unescape_and_decode_value(reader).unwrap();
                     if let Some((interface, name)) = full.split_once('.') {
-                        enum_path = Some((interface.to_owned(), name.to_owned()));
+                        enum_path = Some((Some(interface.to_owned()), name.to_owned()));
                     } else {
-                        enum_path = Some((cur_interface.name.clone(), full));
+                        enum_path = Some((None, full));
                     }
                 }
                 b"allow-null" => {
@@ -433,7 +436,7 @@ enum ValueType {
     I32,
     U32,
     Enum {
-        interface: String,
+        interface: Option<String>,
         name: String,
     },
     Fixed,
