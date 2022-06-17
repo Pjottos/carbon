@@ -349,8 +349,9 @@ impl ProtocolParser {
             }
         }
 
-        let mut value_type = ValueType::parse(&value_type.expect("arg has no type"), interface)
-            .expect("arg has invalid type");
+        let mut value_type =
+            ValueType::parse(&value_type.expect("arg has no type"), interface, optional)
+                .expect("arg has invalid type");
 
         if let Some((interface, name)) = enum_path {
             assert!(
@@ -363,7 +364,6 @@ impl ProtocolParser {
         Argument {
             name: name.expect("arg has no name"),
             value_type,
-            optional,
         }
     }
 
@@ -425,7 +425,6 @@ struct Callable {
 struct Argument {
     name: String,
     value_type: ValueType,
-    optional: bool,
 }
 
 #[derive(Debug)]
@@ -438,26 +437,49 @@ struct Enum {
 enum ValueType {
     I32,
     U32,
-    Enum { interface: String, name: String },
+    Enum {
+        interface: String,
+        name: String,
+    },
     Fixed,
-    ObjectId { interface: Option<String> },
-    NewObjectId { interface: Option<String> },
-    String,
-    Array,
+    ObjectId {
+        interface: Option<String>,
+        optional: bool,
+    },
+    NewObjectId {
+        interface: Option<String>,
+        optional: bool,
+    },
+    String {
+        optional: bool,
+    },
+    Array {
+        optional: bool,
+    },
     Fd,
 }
 
 impl ValueType {
-    fn parse(value_type: &[u8], interface: Option<String>) -> Result<Self, InvalidValueType> {
+    fn parse(
+        value_type: &[u8],
+        interface: Option<String>,
+        optional: bool,
+    ) -> Result<Self, InvalidValueType> {
         match value_type {
-            b"int" => Ok(Self::I32),
-            b"uint" => Ok(Self::U32),
-            b"fixed" => Ok(Self::Fixed),
-            b"object" => Ok(Self::ObjectId { interface }),
-            b"new_id" => Ok(Self::NewObjectId { interface }),
-            b"string" => Ok(Self::String),
-            b"array" => Ok(Self::Array),
-            b"fd" => Ok(Self::Fd),
+            b"int" if !optional => Ok(Self::I32),
+            b"uint" if !optional => Ok(Self::U32),
+            b"fixed" if !optional => Ok(Self::Fixed),
+            b"object" => Ok(Self::ObjectId {
+                interface,
+                optional,
+            }),
+            b"new_id" => Ok(Self::NewObjectId {
+                interface,
+                optional,
+            }),
+            b"string" => Ok(Self::String { optional }),
+            b"array" => Ok(Self::Array { optional }),
+            b"fd" if !optional => Ok(Self::Fd),
             _ => Err(InvalidValueType),
         }
     }
