@@ -15,6 +15,7 @@ fn main() {
         let entry = entry.unwrap();
         let mut parser = ProtocolParser::new(&entry.path());
         while parser.next(&mut buf) {}
+        println!("{:#?}", parser.protocol);
     }
 }
 
@@ -41,7 +42,7 @@ impl ProtocolParser {
     }
 
     fn next(&mut self, buf: &mut Vec<u8>) -> bool {
-        match self.reader.read_event(buf) {
+        let res = match self.reader.read_event(buf) {
             Ok(Event::Start(ref start)) => match self.protocol.as_mut() {
                 None => {
                     self.create_protocol(start);
@@ -54,7 +55,11 @@ impl ProtocolParser {
             Ok(Event::Eof) => panic!("Unexpected EOF"),
             Err(e) => panic!("Error at position {}: {}", self.reader.buffer_position(), e),
             _ => true,
-        }
+        };
+
+        buf.clear();
+
+        res
     }
 
     fn handle_start(&mut self, start: &BytesStart) -> bool {
