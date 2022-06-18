@@ -1,11 +1,16 @@
-use byteorder::{NativeEndian, ReadBytesExt};
 use nix::{
     errno::Errno,
     sys::socket::{recvmsg, ControlMessageOwned, MsgFlags},
 };
 use tokio::{io, net::UnixStream};
 
-use std::{cell::RefCell, io::IoSliceMut, os::unix::prelude::*};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    io::{IoSlice, IoSliceMut},
+    marker::PhantomData,
+    os::unix::prelude::*,
+};
 
 const MAX_FDS_OUT: usize = 28;
 
@@ -28,7 +33,7 @@ impl From<MessageError> for io::Error {
 
 pub struct MessageStream {
     stream: UnixStream,
-    receive_buf: RefCell<MessageBuf>,
+    receive_buf: RefCell<MessageBuf<Read>>,
 }
 
 impl MessageStream {
@@ -39,13 +44,16 @@ impl MessageStream {
         }
     }
 
-    pub async fn receive(&self) -> io::Result<Option<()>> {
+    pub async fn receive<D>(&self, dispatcher: D) -> io::Result<usize>
+    where
+        D: Fn(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+    {
         loop {
             {
                 let mut receive_buf = self.receive_buf.borrow_mut();
-                let deserialized = receive_buf.try_deserialize();
-                if deserialized.is_some() {
-                    return deserialized.transpose().map_err(|e| e.into());
+                let count = receive_buf.deserialize_messages(&dispatcher)?;
+                if count != 0 {
+                    return Ok(count);
                 }
             }
 
@@ -54,13 +62,13 @@ impl MessageStream {
             let raw_fd = self.stream.as_raw_fd();
             let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
             let mut receive_buf = self.receive_buf.borrow_mut();
-            let (mut vecs, vec_count) = receive_buf.io_vecs_mut()?;
+            let io_slices = &mut [receive_buf.io_slice_mut()?];
             // Can't add directly to receive_buf because it has a live mutable borrow
             let mut new_fds = vec![];
             let res = self.stream.try_io(io::Interest::READABLE, || loop {
                 match recvmsg::<()>(
                     raw_fd,
-                    &mut vecs[..vec_count],
+                    io_slices,
                     Some(&mut cmsg_buf),
                     MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
                 ) {
@@ -86,15 +94,14 @@ impl MessageStream {
             match res {
                 Ok(count) => {
                     if count == 0 {
-                        // Stream is closed, one last try to get a message
-                        return receive_buf
-                            .try_deserialize()
-                            .transpose()
-                            .map_err(|e| e.into());
+                        // Stream is closed, we did not process any messages before
+                        // reading from the stream and there is no new data so it
+                        // is not possible for new messages to have arrived.
+                        return Ok(0);
                     }
 
                     receive_buf.grow(count);
-                    receive_buf.fds.append(&mut new_fds);
+                    receive_buf.fds.extend(new_fds.into_iter());
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     // .readable() gave a false positive, try again
@@ -106,133 +113,119 @@ impl MessageStream {
     }
 }
 
-struct MessageBuf {
-    buf: [u8; Self::BUF_SIZE],
-    head: usize,
-    tail: usize,
+const BUF_SIZE: usize = 4096;
+
+struct Read;
+struct Write;
+struct MessageBuf<I> {
+    buf: [u32; BUF_SIZE / 4],
     len: usize,
-    fds: Vec<RawFd>,
+    fds: VecDeque<RawFd>,
+    _phantom: PhantomData<I>,
 }
 
-impl MessageBuf {
-    const BUF_SIZE: usize = 4096;
-
+impl<I> MessageBuf<I> {
     #[inline]
     fn new() -> Self {
         Self {
-            buf: [0; Self::BUF_SIZE],
-            head: 0,
-            tail: 0,
+            buf: [0; BUF_SIZE / 4],
             len: 0,
-            fds: vec![],
+            fds: VecDeque::new(),
+            _phantom: PhantomData,
         }
     }
 
+    #[inline]
     fn is_full(&self) -> bool {
-        self.len == Self::BUF_SIZE
+        self.len == BUF_SIZE
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
         self.len == 0
     }
+}
 
-    fn io_vecs_mut(&mut self) -> Result<([IoSliceMut; 2], usize), MessageError> {
+impl MessageBuf<Read> {
+    #[inline]
+    fn io_slice_mut(&mut self) -> Result<IoSliceMut, MessageError> {
         if self.is_full() {
             Err(MessageError::TooLarge)
-        } else if self.is_empty() {
-            self.head = 0;
-            self.tail = 0;
-            Ok((
-                [IoSliceMut::new(&mut self.buf), IoSliceMut::new(&mut [])],
-                1,
-            ))
-        } else if self.tail == 0 {
-            let a = &mut self.buf[self.head..];
-            Ok(([IoSliceMut::new(a), IoSliceMut::new(&mut [])], 1))
-        } else if self.head < self.tail {
-            let a = &mut self.buf[self.head..self.tail];
-            Ok(([IoSliceMut::new(a), IoSliceMut::new(&mut [])], 1))
         } else {
-            let (b, a) = self.buf.split_at_mut(self.head);
-            let b = &mut b[..self.tail];
-            Ok(([IoSliceMut::new(a), IoSliceMut::new(b)], 2))
+            let a = &mut bytemuck::cast_slice_mut(&mut self.buf)[self.len..];
+            Ok(IoSliceMut::new(a))
         }
     }
 
+    /// `count` must be smaller than or equal to the length of the current `io_slice_mut`.
+    #[inline]
     fn grow(&mut self, count: usize) {
-        assert!(self.len + count <= Self::BUF_SIZE);
-        self.head = (self.head + count) % Self::BUF_SIZE;
         self.len += count;
     }
 
-    fn shrink(&mut self, count: usize) {
-        self.tail = (self.tail + count) % Self::BUF_SIZE;
-        self.len = self.len.saturating_sub(count);
-    }
+    fn deserialize_messages<D>(&mut self, dispatcher: &D) -> Result<usize, MessageError>
+    where
+        D: Fn(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+    {
+        let mut idx = 0;
+        let mut msg_count = 0;
 
-    fn try_deserialize(&mut self) -> Option<Result<(), MessageError>> {
-        let mut reader = RingBufReader {
-            buf: &self.buf,
-            tail: self.tail,
-            count: self.len,
-        };
+        // While we have enough bytes for a message header
+        while self.len >= 8 {
+            let object_id = self.buf[idx];
+            let header = self.buf[idx + 1];
+            let msg_size = (header >> 16) as usize;
+            let opcode = header as u16;
 
-        let object_id = reader.read_u32::<NativeEndian>().ok()?;
-        let header = reader.read_u32::<NativeEndian>().ok()?;
-        let msg_size = (header >> 16) as usize;
-        let opcode = header & 0xFFFF;
+            log::debug!("object_id : {}", object_id);
+            log::debug!("opcode    : {}", opcode);
+            log::debug!("msg_size  : {}", msg_size);
 
-        if msg_size < 8 || msg_size % 4 != 0 {
-            return Some(Err(MessageError::BadFormat));
-        }
-
-        log::debug!("object_id : {}", object_id);
-        log::debug!("opcode    : {}", opcode);
-        log::debug!("msg_size  : {}", msg_size);
-
-        if self.len >= msg_size {
-            // TODO: deserialize message
-            for _ in (8..msg_size).step_by(4) {
-                log::debug!(
-                    "payload   : {:08x}",
-                    reader.read_u32::<NativeEndian>().ok()?
-                );
+            if msg_size < 8 || msg_size % 4 != 0 {
+                return Err(MessageError::BadFormat);
             }
 
-            self.shrink(msg_size);
+            if self.len >= msg_size {
+                let msg_end = idx + msg_size / 4;
+                let payload = &self.buf[idx + 2..msg_end];
+                for v in payload {
+                    log::debug!("payload   : {:08x}", v,);
+                }
+                dispatcher(object_id, opcode, payload, &mut self.fds)?;
+                msg_count += 1;
 
-            Some(Ok(()))
-        } else {
-            None
+                self.len -= msg_size;
+                idx = msg_end;
+            } else {
+                // We haven't received the full message yet
+                break;
+            }
         }
+
+        if self.len > 0 && idx != 0 {
+            // Copy remaining partial message to start of buffer.
+            // This is not very likely to happen, and most messages are also quite small.
+            self.buf.copy_within(idx..idx + (self.len + 3) / 4, 0);
+        }
+
+        Ok(msg_count)
     }
 }
 
-struct RingBufReader<'a> {
-    buf: &'a [u8; MessageBuf::BUF_SIZE],
-    tail: usize,
-    count: usize,
-}
+impl MessageBuf<Write> {
+    #[inline]
+    fn io_slice(&self) -> IoSlice {
+        let a = &bytemuck::cast_slice(&self.buf)[..self.len];
+        IoSlice::new(a)
+    }
 
-impl<'a> std::io::Read for RingBufReader<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.count == 0 {
-            return Ok(0);
-        }
-
-        let (a, b) = self.buf.split_at(self.tail);
-        let count = self.count.min(buf.len());
-
-        if count <= b.len() {
-            buf[..count].copy_from_slice(&b[..count]);
-        } else {
-            buf[..b.len()].copy_from_slice(b);
-            buf[b.len()..count].copy_from_slice(&a[..count - b.len()]);
-        }
-
-        self.tail = (self.tail + count) % MessageBuf::BUF_SIZE;
-        self.count -= count;
-
-        Ok(count)
+    #[inline]
+    fn allocate(&mut self, chunk_count: usize) -> Option<&mut [u32]> {
+        let new_len = self.len + chunk_count * 4;
+        (new_len <= BUF_SIZE).then(|| {
+            let res = &mut self.buf[self.len / 4..new_len / 4];
+            self.len = new_len;
+            res
+        })
     }
 }

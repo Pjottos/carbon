@@ -84,11 +84,11 @@ impl Gateway {
                     let stream = MessageStream::new(stream);
                     task::spawn_local(async move {
                         loop {
-                            match stream.receive().await {
-                                Ok(Some(r)) => {
-                                    log::debug!("Received: {:?}", r);
+                            match stream.receive(|_, _, _, _| Ok(())).await {
+                                Ok(count) if count != 0 => {
+                                    log::debug!("Processed {} requests", count);
                                 }
-                                Ok(None) => {
+                                Ok(_) => {
                                     log::debug!("Client disconnected");
                                     break;
                                 }
