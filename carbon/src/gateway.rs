@@ -1,7 +1,7 @@
 use crate::message::MessageStream;
 
 use nix::fcntl::{flock, FlockArg};
-use tokio::net::UnixListener;
+use tokio::{net::UnixListener, task};
 
 use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
@@ -82,7 +82,7 @@ impl Gateway {
             match self.listener.accept().await {
                 Ok((stream, _addr)) => {
                     let stream = MessageStream::new(stream);
-                    tokio::spawn(async move {
+                    task::spawn_local(async move {
                         loop {
                             match stream.receive().await {
                                 Ok(Some(r)) => {

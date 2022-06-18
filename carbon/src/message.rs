@@ -1,4 +1,3 @@
-use atomic_refcell::AtomicRefCell;
 use byteorder::{NativeEndian, ReadBytesExt};
 use nix::{
     errno::Errno,
@@ -6,7 +5,7 @@ use nix::{
 };
 use tokio::{io, net::UnixStream};
 
-use std::{io::IoSliceMut, os::unix::prelude::*};
+use std::{cell::RefCell, io::IoSliceMut, os::unix::prelude::*};
 
 const MAX_FDS_OUT: usize = 28;
 
@@ -29,14 +28,14 @@ impl From<MessageError> for io::Error {
 
 pub struct MessageStream {
     stream: UnixStream,
-    receive_buf: AtomicRefCell<MessageBuf>,
+    receive_buf: RefCell<MessageBuf>,
 }
 
 impl MessageStream {
     pub fn new(stream: UnixStream) -> Self {
         Self {
             stream,
-            receive_buf: AtomicRefCell::new(MessageBuf::new()),
+            receive_buf: RefCell::new(MessageBuf::new()),
         }
     }
 

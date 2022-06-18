@@ -1,12 +1,24 @@
+use tokio::{runtime, task};
+
 mod gateway;
 mod message;
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
+fn main() {
     env_logger::init();
 
     log::info!("Starting carbon...");
 
-    let gateway = gateway::Gateway::new();
-    gateway.listen().await;
+    runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime")
+        .block_on(async move {
+            let local = task::LocalSet::new();
+            local
+                .run_until(async move {
+                    let gateway = gateway::Gateway::new();
+                    gateway.listen().await;
+                })
+                .await;
+        });
 }
