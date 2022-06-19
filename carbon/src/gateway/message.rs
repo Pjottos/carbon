@@ -1,6 +1,6 @@
 use nix::{
     errno::Errno,
-    sys::socket::{recvmsg, ControlMessageOwned, MsgFlags},
+    sys::socket::{recvmsg, sendmsg, ControlMessageOwned, MsgFlags, ControlMessage},
     unistd::close,
 };
 
@@ -111,6 +111,37 @@ impl MessageStream {
             return Ok(count);
         }
     }
+
+    pub fn flush(&mut self) -> io::Result<usize> {
+        let mut total_count = 0;
+        let res = loop {
+            if total_count == self.send_buf.len() {
+                break Ok(total_count);
+            }
+
+            self.send_buf.fds.make_contiguous();
+            match sendmsg::<()>(
+                self.stream_fd,
+                &[self.send_buf.io_slice(total_count)],
+                &[ControlMessage::ScmRights(self.send_buf.fds.as_slices().0)],
+                MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
+                None,
+            ) {
+                Ok(count) => {
+                    total_count += count;
+                }
+                Err(e) if e == Errno::EINTR => {
+                    // Should retry
+                    continue;
+                }
+                Err(e) => break Err(e.into()),
+            }
+        };
+
+        self.send_buf.shrink(total_count);
+
+        res
+    }
 }
 
 const BUF_SIZE: usize = 4096;
@@ -141,8 +172,8 @@ impl<I> MessageBuf<I> {
     }
 
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.len == 0
+    fn len(&self) -> usize {
+        self.len
     }
 }
 
@@ -220,8 +251,8 @@ impl MessageBuf<Read> {
 
 impl MessageBuf<Write> {
     #[inline]
-    fn io_slice(&self) -> IoSlice {
-        let a = &bytemuck::cast_slice(&self.buf)[..self.len];
+    fn io_slice(&self, offset: usize) -> IoSlice {
+        let a = &bytemuck::cast_slice(&self.buf)[offset..self.len];
         IoSlice::new(a)
     }
 
@@ -233,5 +264,13 @@ impl MessageBuf<Write> {
             self.len = new_len;
             res
         })
+    }
+
+    fn shrink(&mut self, count: usize) {
+        if count < self.len {
+            let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut self.buf);
+            bytes.copy_within(count..self.len, 0);
+        }
+        self.len -= count;
     }
 }

@@ -231,18 +231,35 @@ impl Gateway {
                         };
 
                     match stream.receive(dispatcher) {
-                        Ok(count) if count != 0 => {
-                            log::debug!("Processed {} requests", count);
-                        }
-                        Ok(_) => {
+                        Ok(0) => {
                             log::debug!("Client disconnected");
                             self.delete_client(token.id);
+                            return Ok(());
+                        }
+                        Ok(count) => {
+                            log::debug!("Processed {} requests", count);
                         }
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
                         Err(e) => {
                             log::error!("Error while receiving message: {}", e);
                             log::error!("Dropping this client");
                             self.delete_client(token.id);
+                            return Ok(());
+                        }
+                    }
+                }
+                if events.contains(EpollFlags::EPOLLOUT) {
+                    match stream.flush() {
+                        Ok(0) => (),
+                        Ok(count) => {
+                            log::debug!("Flushed {} bytes", count);
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
+                        Err(e) => {
+                            log::error!("Error while flushing messages: {}", e);
+                            log::error!("Dropping this client");
+                            self.delete_client(token.id);
+                            return Ok(());
                         }
                     }
                 }

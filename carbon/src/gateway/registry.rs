@@ -59,11 +59,17 @@ impl Interface for WlDisplay {
         opcode: u16,
         args: &[u32],
         _fds: &mut std::collections::VecDeque<std::os::unix::prelude::RawFd>,
-        _send_buf: &mut super::message::MessageBuf<super::message::Write>,
+        send_buf: &mut super::message::MessageBuf<super::message::Write>,
         _registry: &mut ObjectRegistry,
         _objects: &mut Vec<Option<GlobalObjectId>>,
     ) -> Result<(), super::message::MessageError> {
-        log::debug!("Would call {} with {:?}", opcode, args);
+        if opcode == 0 {
+            let buf = send_buf.allocate(3).unwrap();
+            buf[0] = args[0];
+            buf[1] = 0x000C0000;
+            buf[2] = 0;
+        }
+
         Ok(())
     }
 }
