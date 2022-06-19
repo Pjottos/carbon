@@ -1,4 +1,4 @@
-use crate::message::MessageStream;
+use self::{client::Client, message::MessageStream};
 
 use nix::{
     fcntl::{flock, FlockArg},
@@ -9,7 +9,8 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
 use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
-type Client = MessageStream;
+mod message;
+mod client;
 
 pub struct Gateway {
     _lock_file: fs::File,
@@ -175,15 +176,17 @@ impl Gateway {
                     Some(&mut client_data_event),
                 )?;
 
-                let stream = Some(MessageStream::new(stream_fd));
+                let client = Client {
+                    stream: MessageStream::new(stream_fd),
+                };
                 match self.clients.get_mut(client_id as usize) {
-                    Some(entry) => *entry = stream,
-                    None => self.clients.push(stream),
+                    Some(entry) => *entry = Some(client),
+                    None => self.clients.push(Some(client)),
                 }
             }
             ClientData => {
-                let stream = match self.client_mut(token.id) {
-                    Some(stream) => stream,
+                let client = match self.client_mut(token.id) {
+                    Some(client) => client,
                     None => {
                         log::warn!("Received ready event for non-existing client");
                         return Ok(());
@@ -191,7 +194,7 @@ impl Gateway {
                 };
 
                 if events.contains(EpollFlags::EPOLLIN) {
-                    match stream.receive(|_, _, _, _| Ok(())) {
+                    match client.stream.receive(|_, _, _, _| Ok(())) {
                         Ok(count) if count != 0 => {
                             log::debug!("Processed {} requests", count);
                         }

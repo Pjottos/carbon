@@ -1,5 +1,4 @@
 mod gateway;
-mod message;
 
 fn main() {
     env_logger::init();
