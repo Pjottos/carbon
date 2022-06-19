@@ -1,13 +1,12 @@
 use nix::{
     errno::Errno,
     sys::socket::{recvmsg, ControlMessageOwned, MsgFlags},
+    unistd::close,
 };
-use tokio::{io, net::UnixStream};
 
 use std::{
-    cell::RefCell,
     collections::VecDeque,
-    io::{IoSlice, IoSliceMut},
+    io::{self, IoSlice, IoSliceMut},
     marker::PhantomData,
     os::unix::prelude::*,
 };
@@ -32,83 +31,72 @@ impl From<MessageError> for io::Error {
 }
 
 pub struct MessageStream {
-    stream: UnixStream,
-    receive_buf: RefCell<MessageBuf<Read>>,
+    stream_fd: RawFd,
+    receive_buf: MessageBuf<Read>,
+}
+
+impl Drop for MessageStream {
+    fn drop(&mut self) {
+        let _ = close(self.stream_fd);
+    }
 }
 
 impl MessageStream {
-    pub fn new(stream: UnixStream) -> Self {
+    pub fn new(stream_fd: RawFd) -> Self {
         Self {
-            stream,
-            receive_buf: RefCell::new(MessageBuf::new()),
+            stream_fd,
+            receive_buf: MessageBuf::new(),
         }
     }
 
-    pub async fn receive<D>(&self, dispatcher: D) -> io::Result<usize>
+    pub fn receive<D>(&mut self, dispatcher: D) -> io::Result<usize>
     where
         D: Fn(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
     {
+        let mut count = 0;
+        let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
         loop {
-            {
-                let mut receive_buf = self.receive_buf.borrow_mut();
-                let count = receive_buf.deserialize_messages(&dispatcher)?;
-                if count != 0 {
-                    return Ok(count);
-                }
-            }
-
-            self.stream.readable().await?;
-
-            let raw_fd = self.stream.as_raw_fd();
-            let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
-            let mut receive_buf = self.receive_buf.borrow_mut();
-            let io_slices = &mut [receive_buf.io_slice_mut()?];
-            // Can't add directly to receive_buf because it has a live mutable borrow
-            let mut new_fds = vec![];
-            let res = self.stream.try_io(io::Interest::READABLE, || loop {
-                match recvmsg::<()>(
-                    raw_fd,
-                    io_slices,
-                    Some(&mut cmsg_buf),
-                    MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
-                ) {
-                    Ok(msg) => {
-                        for cmsg in msg.cmsgs() {
-                            if let ControlMessageOwned::ScmRights(mut fds) = cmsg {
-                                new_fds.append(&mut fds);
-                            }
-                        }
-
-                        break Ok(msg.bytes);
-                    }
-                    Err(e) if e == Errno::EWOULDBLOCK || e == Errno::EAGAIN => {
-                        break Err(io::ErrorKind::WouldBlock.into());
-                    }
-                    Err(e) if e == Errno::EINTR => {
-                        continue;
-                    }
-                    Err(e) => break Err(e.into()),
-                }
-            });
-
-            match res {
-                Ok(count) => {
-                    if count == 0 {
-                        // Stream is closed, we did not process any messages before
-                        // reading from the stream and there is no new data so it
-                        // is not possible for new messages to have arrived.
+            match recvmsg::<()>(
+                self.stream_fd,
+                &mut [self.receive_buf.io_slice_mut()],
+                Some(&mut cmsg_buf),
+                MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
+            ) {
+                Ok(msg) => {
+                    if msg.bytes == 0 {
+                        // Stream is closed, assume that there are no whole messages
+                        // still in the buffer since they should have been processed
+                        // in the last invocation.
                         return Ok(0);
                     }
 
-                    receive_buf.grow(count);
-                    receive_buf.fds.extend(new_fds.into_iter());
+                    self.receive_buf.grow(msg.bytes);
+                    for cmsg in msg.cmsgs() {
+                        if let ControlMessageOwned::ScmRights(fds) = cmsg {
+                            self.receive_buf.fds.extend(fds.into_iter());
+                        }
+                    }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // .readable() gave a false positive, try again
+                Err(e) if e == Errno::EINTR => {
+                    // Should retry
                     continue;
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             }
+
+            let should_read = self.receive_buf.is_full();
+            count += self.receive_buf.deserialize_messages(&dispatcher)?;
+            if count == 0 {
+                return if should_read {
+                    Err(MessageError::TooLarge.into())
+                } else {
+                    Err(io::ErrorKind::WouldBlock.into())
+                };
+            }
+            if should_read {
+                continue;
+            }
+            return Ok(count);
         }
     }
 }
@@ -148,13 +136,9 @@ impl<I> MessageBuf<I> {
 
 impl MessageBuf<Read> {
     #[inline]
-    fn io_slice_mut(&mut self) -> Result<IoSliceMut, MessageError> {
-        if self.is_full() {
-            Err(MessageError::TooLarge)
-        } else {
-            let a = &mut bytemuck::cast_slice_mut(&mut self.buf)[self.len..];
-            Ok(IoSliceMut::new(a))
-        }
+    fn io_slice_mut(&mut self) -> IoSliceMut {
+        let a = &mut bytemuck::cast_slice_mut(&mut self.buf)[self.len..];
+        IoSliceMut::new(a)
     }
 
     /// `count` must be smaller than or equal to the length of the current `io_slice_mut`.
