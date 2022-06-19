@@ -7,7 +7,7 @@ slotmap::new_key_type! { pub struct GlobalObjectId; }
 pub struct ObjectRegistry {
     display_id: GlobalObjectId,
     globals: Vec<GlobalObjectId>,
-    objects: SlotMap<GlobalObjectId, Box<dyn Interface>>,
+    objects: SlotMap<GlobalObjectId, Option<Box<dyn Interface>>>,
 }
 
 impl ObjectRegistry {
@@ -15,7 +15,7 @@ impl ObjectRegistry {
         let mut objects = SlotMap::with_key();
 
         let display: Box<dyn Interface> = Box::new(WlDisplay);
-        let display_id = objects.insert(display);
+        let display_id = objects.insert(Some(display));
 
         Self {
             display_id,
@@ -28,8 +28,17 @@ impl ObjectRegistry {
         self.display_id
     }
 
-    pub fn get_mut(&mut self, id: GlobalObjectId) -> Option<&mut (dyn Interface + 'static)> {
-        self.objects.get_mut(id).map(|b| &mut **b)
+    pub fn take(&mut self, id: GlobalObjectId) -> Option<Box<dyn Interface>> {
+        self.objects.get_mut(id).and_then(|b| b.take())
+    }
+
+    pub fn restore(&mut self, id: GlobalObjectId, object: Box<dyn Interface>) {
+        let entry = self
+            .objects
+            .get_mut(id)
+            .expect("Tried to restore non-existent object");
+
+        *entry = Some(object);
     }
 }
 
@@ -50,6 +59,9 @@ impl Interface for WlDisplay {
         opcode: u16,
         args: &[u32],
         _fds: &mut std::collections::VecDeque<std::os::unix::prelude::RawFd>,
+        _send_buf: &mut super::message::MessageBuf<super::message::Write>,
+        _registry: &mut ObjectRegistry,
+        _objects: &mut Vec<Option<GlobalObjectId>>,
     ) -> Result<(), super::message::MessageError> {
         log::debug!("Would call {} with {:?}", opcode, args);
         Ok(())

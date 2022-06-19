@@ -35,6 +35,7 @@ impl From<MessageError> for io::Error {
 pub struct MessageStream {
     stream_fd: RawFd,
     receive_buf: MessageBuf<Read>,
+    send_buf: MessageBuf<Write>,
 }
 
 impl Drop for MessageStream {
@@ -48,12 +49,19 @@ impl MessageStream {
         Self {
             stream_fd,
             receive_buf: MessageBuf::new(),
+            send_buf: MessageBuf::new(),
         }
     }
 
     pub fn receive<D>(&mut self, mut dispatcher: D) -> io::Result<usize>
     where
-        D: FnMut(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+        D: FnMut(
+            u32,
+            u16,
+            &[u32],
+            &mut VecDeque<RawFd>,
+            &mut MessageBuf<Write>,
+        ) -> Result<(), MessageError>,
     {
         let mut count = 0;
         let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
@@ -87,7 +95,9 @@ impl MessageStream {
             }
 
             let should_read = self.receive_buf.is_full();
-            count += self.receive_buf.deserialize_messages(&mut dispatcher)?;
+            count += self
+                .receive_buf
+                .deserialize_messages(&mut dispatcher, &mut self.send_buf)?;
             if count == 0 {
                 return if should_read {
                     Err(MessageError::TooLarge.into())
@@ -106,8 +116,8 @@ impl MessageStream {
 const BUF_SIZE: usize = 4096;
 
 struct Read;
-struct Write;
-struct MessageBuf<I> {
+pub struct Write;
+pub struct MessageBuf<I> {
     buf: [u32; BUF_SIZE / 4],
     len: usize,
     fds: VecDeque<RawFd>,
@@ -149,9 +159,19 @@ impl MessageBuf<Read> {
         self.len += count;
     }
 
-    fn deserialize_messages<D>(&mut self, dispatcher: &mut D) -> Result<usize, MessageError>
+    fn deserialize_messages<D>(
+        &mut self,
+        dispatcher: &mut D,
+        send_buf: &mut MessageBuf<Write>,
+    ) -> Result<usize, MessageError>
     where
-        D: FnMut(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+        D: FnMut(
+            u32,
+            u16,
+            &[u32],
+            &mut VecDeque<RawFd>,
+            &mut MessageBuf<Write>,
+        ) -> Result<(), MessageError>,
     {
         let mut idx = 0;
         let mut msg_count = 0;
@@ -177,7 +197,7 @@ impl MessageBuf<Read> {
                 for v in payload {
                     log::debug!("payload   : {:08x}", v,);
                 }
-                dispatcher(object_id, opcode, payload, &mut self.fds)?;
+                dispatcher(object_id, opcode, payload, &mut self.fds, send_buf)?;
                 msg_count += 1;
 
                 self.len -= msg_size;
@@ -206,7 +226,7 @@ impl MessageBuf<Write> {
     }
 
     #[inline]
-    fn allocate(&mut self, chunk_count: usize) -> Option<&mut [u32]> {
+    pub fn allocate(&mut self, chunk_count: usize) -> Option<&mut [u32]> {
         let new_len = self.len + chunk_count * 4;
         (new_len <= BUF_SIZE).then(|| {
             let res = &mut self.buf[self.len / 4..new_len / 4];

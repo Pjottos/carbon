@@ -204,22 +204,31 @@ impl Gateway {
                 };
 
                 if events.contains(EpollFlags::EPOLLIN) {
-                    let dispatcher = |object_id, opcode, args: &[u32], fds: &mut _| {
-                        let global_id = objects
-                            .get(object_id as usize)
-                            .and_then(|id| *id)
-                            .ok_or(MessageError::InvalidObject)?;
+                    let dispatcher =
+                        |object_id, opcode, args: &_, fds: &mut _, send_buf: &mut _| {
+                            let global_id = objects
+                                .get(object_id as usize)
+                                .and_then(|id| *id)
+                                .ok_or(MessageError::InvalidObject)?;
 
-                        if let Some(object) = self.registry.get_mut(global_id) {
-                            object.dispatch(opcode, args, fds)?;
-                        } else {
-                            // Can happen if object has been deleted but the client has not
-                            // yet acknowledged it.
-                            log::debug!("Attempt to dispatch request for deleted object");
-                        }
+                            if let Some(mut object) = self.registry.take(global_id) {
+                                object.dispatch(
+                                    opcode,
+                                    args,
+                                    fds,
+                                    send_buf,
+                                    &mut self.registry,
+                                    objects,
+                                )?;
+                                self.registry.restore(global_id, object);
+                            } else {
+                                // Can happen if object has been deleted but the client has not
+                                // yet acknowledged it.
+                                log::debug!("Attempt to dispatch request for deleted object");
+                            }
 
-                        Ok(())
-                    };
+                            Ok(())
+                        };
 
                     match stream.receive(dispatcher) {
                         Ok(count) if count != 0 => {
