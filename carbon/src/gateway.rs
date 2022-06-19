@@ -9,11 +9,13 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
 use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
+type Client = MessageStream;
+
 pub struct Gateway {
     _lock_file: fs::File,
     listener_fd: RawFd,
     epoll_fd: RawFd,
-    clients: Vec<Option<MessageStream>>,
+    clients: Vec<Option<Client>>,
 }
 
 impl Drop for Gateway {
@@ -180,11 +182,7 @@ impl Gateway {
                 }
             }
             ClientData => {
-                let stream = match self
-                    .clients
-                    .get_mut(token.id as usize)
-                    .and_then(|e| e.as_mut())
-                {
+                let stream = match self.client_mut(token.id) {
                     Some(stream) => stream,
                     None => {
                         log::warn!("Received ready event for non-existing client");
@@ -199,13 +197,13 @@ impl Gateway {
                         }
                         Ok(_) => {
                             log::debug!("Client disconnected");
-                            todo!();
+                            self.delete_client(token.id);
                         }
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
                         Err(e) => {
                             log::error!("Error while receiving message: {}", e);
                             log::error!("Dropping this client");
-                            todo!();
+                            self.delete_client(token.id);
                         }
                     }
                 }
@@ -222,6 +220,20 @@ impl Gateway {
             .count()
             .try_into()
             .expect("Too many clients")
+    }
+
+    fn client(&self, id: u32) -> Option<&Client> {
+        self.clients.get(id as usize).and_then(|e| e.as_ref())
+    }
+
+    fn client_mut(&mut self, id: u32) -> Option<&mut Client> {
+        self.clients.get_mut(id as usize).and_then(|e| e.as_mut())
+    }
+
+    fn delete_client(&mut self, id: u32) {
+        if let Some(entry) = self.clients.get_mut(id as usize) {
+            let _ = entry.take();
+        }
     }
 }
 
