@@ -18,6 +18,7 @@ const MAX_FDS_OUT: usize = 28;
 pub enum MessageError {
     TooLarge,
     BadFormat,
+    InvalidObject,
 }
 
 impl From<MessageError> for io::Error {
@@ -25,6 +26,7 @@ impl From<MessageError> for io::Error {
         let text = match e {
             MessageError::TooLarge => "Wayland message did not fit in buffer",
             MessageError::BadFormat => "Wayland message had incorrect format",
+            MessageError::InvalidObject => "Wayland message had invalid object id",
         };
         io::Error::new(io::ErrorKind::InvalidData, text)
     }
@@ -49,9 +51,9 @@ impl MessageStream {
         }
     }
 
-    pub fn receive<D>(&mut self, dispatcher: D) -> io::Result<usize>
+    pub fn receive<D>(&mut self, mut dispatcher: D) -> io::Result<usize>
     where
-        D: Fn(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+        D: FnMut(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
     {
         let mut count = 0;
         let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
@@ -85,7 +87,7 @@ impl MessageStream {
             }
 
             let should_read = self.receive_buf.is_full();
-            count += self.receive_buf.deserialize_messages(&dispatcher)?;
+            count += self.receive_buf.deserialize_messages(&mut dispatcher)?;
             if count == 0 {
                 return if should_read {
                     Err(MessageError::TooLarge.into())
@@ -147,9 +149,9 @@ impl MessageBuf<Read> {
         self.len += count;
     }
 
-    fn deserialize_messages<D>(&mut self, dispatcher: &D) -> Result<usize, MessageError>
+    fn deserialize_messages<D>(&mut self, dispatcher: &mut D) -> Result<usize, MessageError>
     where
-        D: Fn(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
+        D: FnMut(u32, u16, &[u32], &mut VecDeque<RawFd>) -> Result<(), MessageError>,
     {
         let mut idx = 0;
         let mut msg_count = 0;

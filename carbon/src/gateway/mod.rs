@@ -1,4 +1,8 @@
-use self::{client::Client, message::MessageStream};
+use self::{
+    client::Client,
+    message::{MessageError, MessageStream},
+    registry::ObjectRegistry,
+};
 
 use nix::{
     fcntl::{flock, FlockArg},
@@ -9,14 +13,17 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
 use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
-mod message;
 mod client;
+mod interface;
+mod message;
+mod registry;
 
 pub struct Gateway {
     _lock_file: fs::File,
     listener_fd: RawFd,
     epoll_fd: RawFd,
     clients: Vec<Option<Client>>,
+    registry: ObjectRegistry,
 }
 
 impl Drop for Gateway {
@@ -120,6 +127,7 @@ impl Gateway {
                 listener_fd,
                 epoll_fd,
                 clients: vec![],
+                registry: ObjectRegistry::new(),
             };
         }
 
@@ -176,17 +184,19 @@ impl Gateway {
                     Some(&mut client_data_event),
                 )?;
 
-                let client = Client {
-                    stream: MessageStream::new(stream_fd),
-                };
+                let client = Client::new(MessageStream::new(stream_fd), self.registry.display_id());
                 match self.clients.get_mut(client_id as usize) {
                     Some(entry) => *entry = Some(client),
                     None => self.clients.push(Some(client)),
                 }
             }
             ClientData => {
-                let client = match self.client_mut(token.id) {
-                    Some(client) => client,
+                let (stream, objects) = match self
+                    .clients
+                    .get_mut(token.id as usize)
+                    .and_then(Option::as_mut)
+                {
+                    Some(client) => client.stream_and_objects_mut(),
                     None => {
                         log::warn!("Received ready event for non-existing client");
                         return Ok(());
@@ -194,7 +204,24 @@ impl Gateway {
                 };
 
                 if events.contains(EpollFlags::EPOLLIN) {
-                    match client.stream.receive(|_, _, _, _| Ok(())) {
+                    let dispatcher = |object_id, opcode, args: &[u32], fds: &mut _| {
+                        let global_id = objects
+                            .get(object_id as usize)
+                            .and_then(|id| *id)
+                            .ok_or(MessageError::InvalidObject)?;
+
+                        if let Some(object) = self.registry.get_mut(global_id) {
+                            object.dispatch(opcode, args, fds)?;
+                        } else {
+                            // Can happen if object has been deleted but the client has not
+                            // yet acknowledged it.
+                            log::debug!("Attempt to dispatch request for deleted object");
+                        }
+
+                        Ok(())
+                    };
+
+                    match stream.receive(dispatcher) {
                         Ok(count) if count != 0 => {
                             log::debug!("Processed {} requests", count);
                         }
@@ -223,14 +250,6 @@ impl Gateway {
             .count()
             .try_into()
             .expect("Too many clients")
-    }
-
-    fn client(&self, id: u32) -> Option<&Client> {
-        self.clients.get(id as usize).and_then(|e| e.as_ref())
-    }
-
-    fn client_mut(&mut self, id: u32) -> Option<&mut Client> {
-        self.clients.get_mut(id as usize).and_then(|e| e.as_mut())
     }
 
     fn delete_client(&mut self, id: u32) {
