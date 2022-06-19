@@ -1,6 +1,6 @@
 use nix::{
     errno::Errno,
-    sys::socket::{recvmsg, sendmsg, ControlMessageOwned, MsgFlags, ControlMessage},
+    sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags},
     unistd::close,
 };
 
@@ -120,15 +120,19 @@ impl MessageStream {
             }
 
             self.send_buf.fds.make_contiguous();
+            let control_messages = [ControlMessage::ScmRights(self.send_buf.fds.as_slices().0)];
+            let control_message_count = (!self.send_buf.fds.is_empty()) as usize;
+
             match sendmsg::<()>(
                 self.stream_fd,
                 &[self.send_buf.io_slice(total_count)],
-                &[ControlMessage::ScmRights(self.send_buf.fds.as_slices().0)],
+                &control_messages[..control_message_count],
                 MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
                 None,
             ) {
                 Ok(count) => {
                     total_count += count;
+                    self.send_buf.fds.clear();
                 }
                 Err(e) if e == Errno::EINTR => {
                     // Should retry
