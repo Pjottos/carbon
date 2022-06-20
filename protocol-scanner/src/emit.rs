@@ -246,7 +246,7 @@ impl CodeBuilder {
                         let mut __a = 0;
                         #(#extract_args)*
                         if __a == args.len() {
-                            object.#fn_name(#(#args),*)
+                            object.#fn_name(state, #(#args),*)
                         } else {
                             Err(MessageError::BadFormat)
                         }
