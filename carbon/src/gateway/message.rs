@@ -19,6 +19,7 @@ pub enum MessageError {
     TooLarge,
     BadFormat,
     InvalidObject,
+    InvalidOpcode,
 }
 
 impl From<MessageError> for io::Error {
@@ -27,6 +28,7 @@ impl From<MessageError> for io::Error {
             MessageError::TooLarge => "Wayland message did not fit in buffer",
             MessageError::BadFormat => "Wayland message had incorrect format",
             MessageError::InvalidObject => "Wayland message had invalid object id",
+            MessageError::InvalidOpcode => "Wayland message had invalid opcode for object",
         };
         io::Error::new(io::ErrorKind::InvalidData, text)
     }
