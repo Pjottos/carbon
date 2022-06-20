@@ -1,7 +1,7 @@
 use crate::{Protocol, ValueType};
 
 use convert_case::{Case, Casing};
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 
 use std::iter;
@@ -77,6 +77,45 @@ impl CodeBuilder {
         let interfaces = protocol.interfaces.iter().map(|interface| {
             let interface_mod = format_ident!("{}", interface.name);
             let interface_struct = format_ident!("{}", interface.name.to_case(Case::Pascal));
+
+            let enums = interface.enums.iter().map(|enum_| {
+                let name = format_ident!("{}", enum_.name.to_case(Case::Pascal));
+
+                fn convert_variant_name(name: &str) -> Ident {
+                    let name = name.to_case(Case::Pascal);
+                    match name.parse::<u32>() {
+                        Ok(_) => format_ident!("U{}", name),
+                        Err(_) => format_ident!("{}", name),
+                    }
+                }
+                let entries = enum_.entries.iter().map(|(name, value)| {
+                    let name = convert_variant_name(name);
+                    quote! { #name = #value }
+                });
+                let match_entries = enum_.entries.iter().map(|(name, value)| {
+                    let name = convert_variant_name(name);
+                    quote! { #value => Ok(Self::#name) }
+                });
+
+                quote! {
+                    #[repr(u32)]
+                    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+                    pub enum #name {
+                        #(#entries),*
+                    }
+
+                    impl TryFrom<u32> for #name {
+                        type Error = MessageError;
+
+                        fn try_from(v: u32) -> Self {
+                            match v {
+                                #(#match_entries),*,
+                                _ => Err(MessageError::BadFormat),
+                            }
+                        }
+                    }
+                }
+            });
 
             let request_dispatches = interface.requests.iter().map(|request| {
                 let extract_args = request.args.iter().map(|arg| {
@@ -259,6 +298,7 @@ impl CodeBuilder {
                 pub mod #interface_mod {
                     use super::*;
 
+                    #(#enums)*
                     #(#request_dispatches)*
                     #(#events)*
                 }
