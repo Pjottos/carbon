@@ -47,11 +47,11 @@ impl ObjectRegistry {
 // TODO: automatically generate this
 struct WlDisplay;
 
-pub type RequestMarshaller = fn(&[u32], &mut DispatchState) -> Result<(), MessageError>;
+pub type RequestDemarshaller = fn(&[u32], &mut DispatchState) -> Result<(), MessageError>;
 
 pub static INTERFACE_NAMES: [&str; 1] = ["wl_display"];
 pub static INTERFACE_VERSIONS: [u32; 1] = [1];
-pub static INTERFACE_DISPATCH_TABLE: [[Option<RequestMarshaller>; 2]; 1] =
+pub static INTERFACE_DISPATCH_TABLE: [[Option<RequestDemarshaller>; 2]; 1] =
     [[Some(wl_display::sync), Some(wl_display::get_registry)]];
 
 mod wl_display {
