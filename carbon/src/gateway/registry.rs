@@ -1,4 +1,4 @@
-use super::interface::Interface;
+use crate::protocol::{Interface, WlDisplay};
 
 use slotmap::SlotMap;
 
@@ -14,7 +14,7 @@ impl ObjectRegistry {
     pub fn new() -> Self {
         let mut objects = SlotMap::with_key();
 
-        let display_id = objects.insert(Some(Interface::WlDisplay));
+        let display_id = objects.insert(Some(Interface::WlDisplay(WlDisplay)));
 
         Self {
             display_id,

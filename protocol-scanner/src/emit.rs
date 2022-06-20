@@ -61,7 +61,20 @@ impl CodeBuilder {
             }
         });
 
+        let interface_enum_variants = interface_names.iter().map(|name| {
+            let name = format_ident!("{}", name.to_case(Case::Pascal));
+            quote! { #name(interface::#name) }
+        });
+
         quote! {
+            use crate::{
+                gateway::message::MessageError,
+                interface::{self, DispatchState},
+            };
+            use fixed::types::I24F8;
+            use bytemuck::cast_slice;
+            use std::os::unix::RawFd;
+
             pub type RequestDemarshaller = fn #demarshaller_signature;
             type DispatchEntry = [Option<RequestDemarshaller>; #max_request_count];
 
@@ -70,6 +83,10 @@ impl CodeBuilder {
             pub static INTERFACE_DISPATCH_TABLE: [DispatchEntry; #interface_count] = [#(#dispatch_entries),*];
 
             #(#protocols)*
+
+            pub enum Interface {
+                #(#interface_enum_variants),*
+            }
         }
     }
 
@@ -290,7 +307,7 @@ impl CodeBuilder {
                 });
 
                 quote! {
-                    pub fn #fn_name(self_id: ObjectId<#interface_struct>, #(#args),*) {}
+                    pub fn #fn_name(self_id: ObjectId<interface::#interface_struct>, #(#args),*) {}
                 }
             });
 
@@ -305,16 +322,8 @@ impl CodeBuilder {
             }
         });
 
-        let protocol_mod = format_ident!("{}", protocol.name);
         let protocol_tokens = quote! {
-            pub mod #protocol_mod {
-                use crate::gateway::{MessageError, DispatchState};
-                use fixed::types::I24F8;
-                use bytemuck::cast_slice;
-                use std::os::unix::RawFd;
-
-                #(#interfaces)*
-            }
+            #(#interfaces)*
         };
 
         for interface in protocol.interfaces {
@@ -326,7 +335,7 @@ impl CodeBuilder {
                 .into_iter()
                 .map(|r| {
                     let fn_name = format_ident!("handle_{}", r.name);
-                    quote! { #protocol_mod::#interface_mod::#fn_name }
+                    quote! { #interface_mod::#fn_name }
                 })
                 .collect();
             self.dispatch_functions_paths.push(paths);

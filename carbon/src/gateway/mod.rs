@@ -1,6 +1,10 @@
 use crate::{
-    gateway::{client::Client, message::MessageStream, registry::ObjectRegistry},
-    protocol::INTERFACE_DISPATCH_TABLE,
+    gateway::{
+        client::Client,
+        message::{MessageError, MessageStream},
+        registry::ObjectRegistry,
+    },
+    protocol::DispatchState,
 };
 
 use nix::{
@@ -10,17 +14,11 @@ use nix::{
 };
 use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
-use std::{env, fs, intrinsics::discriminant_value, io, os::unix::prelude::*, path::PathBuf};
+use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
 mod client;
-mod interface;
-mod message;
-mod registry;
-
-pub use self::{
-    interface::{DispatchState, Interface},
-    message::MessageError,
-};
+pub mod message;
+pub mod registry;
 
 pub struct Gateway {
     _lock_file: fs::File,
@@ -216,19 +214,14 @@ impl Gateway {
                                 .and_then(|id| *id)
                                 .ok_or(MessageError::InvalidObject)?;
 
-                            if let Some(object) = self.registry.take(global_id) {
+                            if let Some(mut object) = self.registry.take(global_id) {
                                 let mut state = DispatchState {
                                     fds,
                                     send_buf,
                                     registry: &mut self.registry,
                                     objects,
                                 };
-                                let res = INTERFACE_DISPATCH_TABLE
-                                    .get(discriminant_value(&object) as usize)
-                                    .and_then(|funcs| funcs.get(opcode as usize))
-                                    .and_then(Option::as_ref)
-                                    .ok_or(MessageError::InvalidOpcode)
-                                    .and_then(|f| f(args, &mut state));
+                                let res = object.dispatch(opcode, args, &mut state);
                                 self.registry.restore(global_id, object);
                                 res?;
                             } else {
