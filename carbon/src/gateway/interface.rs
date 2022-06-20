@@ -1,5 +1,5 @@
 use super::{
-    message::{MessageBuf, MessageError, Write},
+    message::{MessageBuf, Write},
     registry::{GlobalObjectId, ObjectRegistry},
 };
 

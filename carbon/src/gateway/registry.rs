@@ -1,7 +1,4 @@
-use super::{
-    interface::{DispatchState, Interface},
-    message::MessageError,
-};
+use super::interface::Interface;
 
 use slotmap::SlotMap;
 

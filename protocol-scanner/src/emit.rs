@@ -107,7 +107,7 @@ impl CodeBuilder {
                     impl TryFrom<u32> for #name {
                         type Error = MessageError;
 
-                        fn try_from(v: u32) -> Self {
+                        fn try_from(v: u32) -> Result<Self, MessageError> {
                             match v {
                                 #(#match_entries),*,
                                 _ => Err(MessageError::BadFormat),
@@ -121,7 +121,7 @@ impl CodeBuilder {
                 let extract_args = request.args.iter().map(|arg| {
                     let arg_size;
                     let cur_chunk = quote! {
-                        args.get(__a).ok_or(MessageError::BadFormat)?
+                        (*args.get(__a).ok_or(MessageError::BadFormat)?)
                     };
                     let name = format_ident!("{}", &arg.name);
                     let extract = match &arg.value_type {
@@ -160,7 +160,7 @@ impl CodeBuilder {
                             }
                         }
                         ValueType::String { optional } => {
-                            arg_size = quote! { (#cur_chunk + 3) / 4 };
+                            arg_size = quote! { (#cur_chunk as usize + 3) / 4 };
                             let create_option = quote! {
                                 #cur_chunk
                                     .checked_sub(1)
@@ -308,9 +308,10 @@ impl CodeBuilder {
         let protocol_mod = format_ident!("{}", protocol.name);
         let protocol_tokens = quote! {
             pub mod #protocol_mod {
+                use crate::gateway::{MessageError, DispatchState};
                 use fixed::types::I24F8;
-                use std::os::unix::RawFd;
                 use bytemuck::cast_slice;
+                use std::os::unix::RawFd;
 
                 #(#interfaces)*
             }

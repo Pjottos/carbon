@@ -1,10 +1,5 @@
 use crate::{
-    gateway::{
-        client::Client,
-        interface::DispatchState,
-        message::{MessageError, MessageStream},
-        registry::ObjectRegistry,
-    },
+    gateway::{client::Client, message::MessageStream, registry::ObjectRegistry},
     protocol::INTERFACE_DISPATCH_TABLE,
 };
 
@@ -21,6 +16,11 @@ mod client;
 mod interface;
 mod message;
 mod registry;
+
+pub use self::{
+    interface::{DispatchState, Interface},
+    message::MessageError,
+};
 
 pub struct Gateway {
     _lock_file: fs::File,
