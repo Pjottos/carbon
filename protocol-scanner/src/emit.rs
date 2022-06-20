@@ -17,7 +17,7 @@ pub struct CodeBuilder {
 impl Default for CodeBuilder {
     fn default() -> Self {
         let demarshaller_signature = quote! {
-            (args: &[u32], state: &mut DispatchState) -> Result<(), MessageError>
+            (object: &mut Interface, args: &[u32], state: &mut DispatchState) -> Result<(), MessageError>
         };
 
         Self {
@@ -63,7 +63,7 @@ impl CodeBuilder {
 
         let interface_enum_variants = interface_names.iter().map(|name| {
             let name = format_ident!("{}", name.to_case(Case::Pascal));
-            quote! { #name(interface::#name) }
+            quote! { #name(protocol::#name) }
         });
 
         quote! {
@@ -72,11 +72,11 @@ impl CodeBuilder {
                     message::MessageError,
                     registry::ObjectId,
                 },
-                interface::{self, DispatchState},
+                protocol::{self, DispatchState},
             };
             use fixed::types::I24F8;
             use bytemuck::cast_slice;
-            use std::os::unix::RawFd;
+            use std::os::unix::io::RawFd;
 
             pub type RequestDemarshaller = fn #demarshaller_signature;
             type DispatchEntry = [Option<RequestDemarshaller>; #max_request_count];
@@ -240,6 +240,9 @@ impl CodeBuilder {
 
                 quote! {
                     pub fn #fn_name #demarshaller_signature {
+                        let object = protocol::#interface_struct::downcast(object)
+                            .expect("Demarshaller called with invalid object");
+
                         let mut __a = 0;
                         #(#extract_args)*
                         if __a == args.len() {
@@ -278,7 +281,7 @@ impl CodeBuilder {
                         } => {
                             let id_type = if let Some(interface) = interface.as_ref() {
                                 let interface = format_ident!("{}", interface.to_case(Case::Pascal));
-                                quote! { ObjectId<#interface> }
+                                quote! { ObjectId<protocol::#interface> }
                             } else {
                                 quote! { ObjectId<Interface> }
                             };
@@ -310,7 +313,7 @@ impl CodeBuilder {
                 });
 
                 quote! {
-                    pub fn #fn_name(self_id: ObjectId<interface::#interface_struct>, #(#args),*) {}
+                    pub fn #fn_name(self_id: ObjectId<protocol::#interface_struct>, #(#args),*) {}
                 }
             });
 
@@ -321,6 +324,15 @@ impl CodeBuilder {
                     #(#enums)*
                     #(#request_dispatches)*
                     #(#events)*
+                }
+
+                impl protocol::#interface_struct {
+                    fn downcast(object: &mut Interface) -> Option<&mut Self> {
+                        match object {
+                            Interface::#interface_struct(v) => Some(v),
+                            _ => None,
+                        }
+                    }
                 }
             }
         });

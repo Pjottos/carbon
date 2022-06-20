@@ -24,7 +24,7 @@ impl Interface {
             .and_then(|funcs| funcs.get(opcode as usize))
             .and_then(Option::as_ref)
             .ok_or(MessageError::InvalidOpcode)
-            .and_then(|f| f(args, &mut state))
+            .and_then(|f| f(self, args, &mut state))
     }
 }
 
