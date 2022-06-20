@@ -10,7 +10,6 @@ pub struct CodeBuilder {
     interface_names: Vec<String>,
     interface_versions: Vec<u32>,
     dispatch_functions_paths: Vec<Vec<TokenStream>>,
-    max_request_count: usize,
     protocols: Vec<TokenStream>,
     demarshaller_signature: TokenStream,
 }
@@ -25,7 +24,6 @@ impl Default for CodeBuilder {
             interface_names: vec![],
             interface_versions: vec![],
             dispatch_functions_paths: vec![],
-            max_request_count: 0,
             protocols: vec![],
             demarshaller_signature,
         }
@@ -38,7 +36,6 @@ impl CodeBuilder {
             interface_names,
             interface_versions,
             dispatch_functions_paths,
-            max_request_count,
             protocols,
             demarshaller_signature,
             ..
@@ -47,12 +44,17 @@ impl CodeBuilder {
         assert_eq!(interface_names.len(), interface_versions.len());
         let interface_count = interface_names.len();
 
+        let max_request_count = dispatch_functions_paths
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0);
         let dispatch_entries = dispatch_functions_paths.into_iter().map(|paths| {
             let funcs = paths
                 .into_iter()
                 .map(|path| quote! { Some(#path) })
                 .chain(iter::repeat(quote! { None }))
-                .take(self.max_request_count);
+                .take(max_request_count);
 
             quote! {
                 [#(#funcs),*]
@@ -75,10 +77,6 @@ impl CodeBuilder {
         let interfaces = protocol.interfaces.iter().map(|interface| {
             let interface_mod = format_ident!("{}", interface.name);
             let interface_struct = format_ident!("{}", interface.name.to_case(Case::Pascal));
-
-            if interface.requests.len() > self.max_request_count {
-                self.max_request_count = interface.requests.len();
-            }
 
             let request_dispatches = interface.requests.iter().map(|request| {
                 let extract_args = request.args.iter().map(|arg| {
