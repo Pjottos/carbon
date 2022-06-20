@@ -33,6 +33,7 @@ pub struct Gateway {
 impl Drop for Gateway {
     fn drop(&mut self) {
         let _ = close(self.listener_fd);
+        let _ = close(self.epoll_fd);
     }
 }
 
