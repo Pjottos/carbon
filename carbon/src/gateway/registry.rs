@@ -2,6 +2,8 @@ use crate::protocol::{Interface, WlDisplay};
 
 use slotmap::SlotMap;
 
+use std::{marker::PhantomData, num::NonZeroU32};
+
 slotmap::new_key_type! { pub struct GlobalObjectId; }
 
 pub struct ObjectRegistry {
@@ -38,5 +40,36 @@ impl ObjectRegistry {
             .expect("Tried to restore non-existent object");
 
         *entry = Some(object);
+    }
+}
+
+#[repr(transparent)]
+pub struct ObjectId<T> {
+    value: NonZeroU32,
+    phantom: PhantomData<T>,
+}
+
+impl<T> ObjectId<T> {
+    pub fn new(raw: u32) -> Option<Self> {
+        NonZeroU32::new(raw).map(|value| Self {
+            value,
+            phantom: PhantomData,
+        })
+    }
+}
+
+pub struct ClientObjects {
+    objects: Vec<Option<GlobalObjectId>>,
+}
+
+impl ClientObjects {
+    pub fn new(display_id: GlobalObjectId) -> Self {
+        Self {
+            objects: vec![None, Some(display_id)],
+        }
+    }
+
+    pub fn get<T>(&self, id: ObjectId<T>) -> Option<GlobalObjectId> {
+        self.objects.get(id.value.get() as usize).and_then(|id| *id)
     }
 }

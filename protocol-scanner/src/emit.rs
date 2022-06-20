@@ -68,7 +68,10 @@ impl CodeBuilder {
 
         quote! {
             use crate::{
-                gateway::message::MessageError,
+                gateway::{
+                    message::MessageError,
+                    registry::ObjectId,
+                },
                 interface::{self, DispatchState},
             };
             use fixed::types::I24F8;

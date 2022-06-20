@@ -1,21 +1,22 @@
-use super::{message::MessageStream, registry::GlobalObjectId};
+use super::{
+    message::MessageStream,
+    registry::{ClientObjects, GlobalObjectId},
+};
 
 pub struct Client {
     stream: MessageStream,
-    objects: Vec<Option<GlobalObjectId>>,
+    objects: ClientObjects,
 }
 
 impl Client {
     pub fn new(stream: MessageStream, display_id: GlobalObjectId) -> Self {
         Self {
             stream,
-            objects: vec![None, Some(display_id)],
+            objects: ClientObjects::new(display_id),
         }
     }
 
-    pub fn stream_and_objects_mut(
-        &mut self,
-    ) -> (&mut MessageStream, &mut Vec<Option<GlobalObjectId>>) {
+    pub fn stream_and_objects_mut(&mut self) -> (&mut MessageStream, &mut ClientObjects) {
         (&mut self.stream, &mut self.objects)
     }
 }

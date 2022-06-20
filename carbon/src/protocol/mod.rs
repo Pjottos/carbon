@@ -1,6 +1,6 @@
 use crate::gateway::{
     message::{MessageBuf, MessageError, Write},
-    registry::{GlobalObjectId, ObjectRegistry},
+    registry::{ClientObjects, ObjectRegistry},
 };
 
 use std::{collections::VecDeque, intrinsics::discriminant_value, os::unix::io::RawFd};
@@ -32,5 +32,5 @@ pub struct DispatchState<'a> {
     pub fds: &'a mut VecDeque<RawFd>,
     pub send_buf: &'a mut MessageBuf<Write>,
     pub registry: &'a mut ObjectRegistry,
-    pub objects: &'a mut Vec<Option<GlobalObjectId>>,
+    pub objects: &'a mut ClientObjects,
 }

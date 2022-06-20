@@ -209,10 +209,8 @@ impl Gateway {
                 if events.contains(EpollFlags::EPOLLIN) {
                     let dispatcher =
                         |object_id, opcode, args: &_, fds: &mut _, send_buf: &mut _| {
-                            let global_id = objects
-                                .get(object_id as usize)
-                                .and_then(|id| *id)
-                                .ok_or(MessageError::InvalidObject)?;
+                            let global_id =
+                                objects.get(object_id).ok_or(MessageError::InvalidObject)?;
 
                             if let Some(mut object) = self.registry.take(global_id) {
                                 let mut state = DispatchState {

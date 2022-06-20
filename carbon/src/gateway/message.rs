@@ -1,3 +1,5 @@
+use crate::{gateway::registry::ObjectId, protocol::Interface};
+
 use nix::{
     errno::Errno,
     sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags},
@@ -58,7 +60,7 @@ impl MessageStream {
     pub fn receive<D>(&mut self, mut dispatcher: D) -> io::Result<usize>
     where
         D: FnMut(
-            u32,
+            ObjectId<Interface>,
             u16,
             &[u32],
             &mut VecDeque<RawFd>,
@@ -203,7 +205,7 @@ impl MessageBuf<Read> {
     ) -> Result<usize, MessageError>
     where
         D: FnMut(
-            u32,
+            ObjectId<Interface>,
             u16,
             &[u32],
             &mut VecDeque<RawFd>,
@@ -219,14 +221,13 @@ impl MessageBuf<Read> {
                 break Ok(msg_count);
             }
 
-            let object_id = self.buf[idx];
+            let object_id = match ObjectId::new(self.buf[idx]) {
+                Some(id) => id,
+                None => break Err(MessageError::InvalidObject),
+            };
             let header = self.buf[idx + 1];
             let msg_size = (header >> 16) as usize;
             let opcode = header as u16;
-
-            log::debug!("object_id : {}", object_id);
-            log::debug!("opcode    : {}", opcode);
-            log::debug!("msg_size  : {}", msg_size);
 
             if msg_size < 8 || msg_size % 4 != 0 {
                 break Err(MessageError::BadFormat);
@@ -235,9 +236,6 @@ impl MessageBuf<Read> {
             if self.len >= msg_size {
                 let msg_end = idx + msg_size / 4;
                 let payload = &self.buf[idx + 2..msg_end];
-                for v in payload {
-                    log::debug!("payload   : {:08x}", v,);
-                }
                 if let Err(e) = dispatcher(object_id, opcode, payload, &mut self.fds, send_buf) {
                     break Err(e);
                 }
