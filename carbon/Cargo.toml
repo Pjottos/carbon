@@ -11,3 +11,6 @@ env_logger = "0.9"
 bytemuck = "1"
 num_enum = "0.5"
 slotmap = "1"
+
+[build-dependencies]
+protocol-scanner = { path = "../protocol-scanner" }

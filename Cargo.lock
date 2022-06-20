@@ -49,6 +49,7 @@ dependencies = [
  "log",
  "nix",
  "num_enum",
+ "protocol-scanner",
  "slotmap",
 ]
 

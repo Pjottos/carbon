@@ -1,6 +1,7 @@
 #![feature(core_intrinsics)]
 
 mod gateway;
+mod protocol;
 
 fn main() {
     env_logger::init();

@@ -1,8 +1,11 @@
-use self::{
-    client::Client,
-    interface::DispatchState,
-    message::{MessageError, MessageStream},
-    registry::ObjectRegistry,
+use crate::{
+    gateway::{
+        client::Client,
+        interface::DispatchState,
+        message::{MessageError, MessageStream},
+        registry::ObjectRegistry,
+    },
+    protocol::INTERFACE_DISPATCH_TABLE,
 };
 
 use nix::{
@@ -219,7 +222,7 @@ impl Gateway {
                                     registry: &mut self.registry,
                                     objects,
                                 };
-                                let res = registry::INTERFACE_DISPATCH_TABLE
+                                let res = INTERFACE_DISPATCH_TABLE
                                     .get(discriminant_value(&object) as usize)
                                     .and_then(|funcs| funcs.get(opcode as usize))
                                     .and_then(Option::as_ref)

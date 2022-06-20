@@ -43,30 +43,3 @@ impl ObjectRegistry {
         *entry = Some(object);
     }
 }
-
-// TODO: automatically generate this
-struct WlDisplay;
-
-pub type RequestDemarshaller = fn(&[u32], &mut DispatchState) -> Result<(), MessageError>;
-
-pub static INTERFACE_NAMES: [&str; 1] = ["wl_display"];
-pub static INTERFACE_VERSIONS: [u32; 1] = [1];
-pub static INTERFACE_DISPATCH_TABLE: [[Option<RequestDemarshaller>; 2]; 1] =
-    [[Some(wl_display::sync), Some(wl_display::get_registry)]];
-
-mod wl_display {
-    use super::*;
-
-    pub fn sync(args: &[u32], state: &mut DispatchState) -> Result<(), MessageError> {
-        let buf = state.send_buf.allocate(3).unwrap();
-        buf[0] = args[0];
-        buf[1] = 0x000C0000;
-        buf[2] = 0;
-
-        Ok(())
-    }
-
-    pub fn get_registry(_args: &[u32], _state: &mut DispatchState) -> Result<(), MessageError> {
-        Ok(())
-    }
-}
