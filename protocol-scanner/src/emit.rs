@@ -223,7 +223,7 @@ impl CodeBuilder {
                         ValueType::Fd => {
                             arg_size = quote! { 0 };
                             quote! {
-                                state.fds.pop_front().ok_or(MessageError::BadFormat)?
+                                state.fds.pop().ok_or(MessageError::BadFormat)?
                             }
                         }
                     };

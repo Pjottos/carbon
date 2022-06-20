@@ -63,7 +63,7 @@ impl MessageStream {
             ObjectId<Interface>,
             u16,
             &[u32],
-            &mut VecDeque<RawFd>,
+            FdSource,
             &mut MessageBuf<Write>,
         ) -> Result<(), MessageError>,
     {
@@ -152,6 +152,14 @@ impl MessageStream {
     }
 }
 
+pub struct FdSource<'a>(&'a mut VecDeque<RawFd>);
+
+impl<'a> FdSource<'a> {
+    pub fn pop(&mut self) -> Option<RawFd> {
+        self.0.pop_front()
+    }
+}
+
 const BUF_SIZE: usize = 4096;
 
 struct Read;
@@ -208,7 +216,7 @@ impl MessageBuf<Read> {
             ObjectId<Interface>,
             u16,
             &[u32],
-            &mut VecDeque<RawFd>,
+            FdSource,
             &mut MessageBuf<Write>,
         ) -> Result<(), MessageError>,
     {
@@ -236,7 +244,13 @@ impl MessageBuf<Read> {
             if self.len >= msg_size {
                 let msg_end = idx + msg_size / 4;
                 let payload = &self.buf[idx + 2..msg_end];
-                if let Err(e) = dispatcher(object_id, opcode, payload, &mut self.fds, send_buf) {
+                if let Err(e) = dispatcher(
+                    object_id,
+                    opcode,
+                    payload,
+                    FdSource(&mut self.fds),
+                    send_buf,
+                ) {
                     break Err(e);
                 }
                 msg_count += 1;

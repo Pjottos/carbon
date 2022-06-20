@@ -1,9 +1,9 @@
 use crate::gateway::{
-    message::{MessageBuf, MessageError, Write},
+    message::{FdSource, MessageBuf, MessageError, Write},
     registry::{ClientObjects, ObjectRegistry},
 };
 
-use std::{collections::VecDeque, intrinsics::discriminant_value, os::unix::io::RawFd};
+use std::intrinsics::discriminant_value;
 
 mod generated;
 pub use generated::Interface;
@@ -29,7 +29,7 @@ impl Interface {
 }
 
 pub struct DispatchState<'a> {
-    pub fds: &'a mut VecDeque<RawFd>,
+    pub fds: FdSource<'a>,
     pub send_buf: &'a mut MessageBuf<Write>,
     pub registry: &'a mut ObjectRegistry,
     pub objects: &'a mut ClientObjects,

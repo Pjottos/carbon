@@ -1,7 +1,7 @@
 use crate::{
     gateway::{
         client::Client,
-        message::{MessageError, MessageStream},
+        message::{FdSource, MessageError, MessageStream},
         registry::ObjectRegistry,
     },
     protocol::DispatchState,
@@ -208,7 +208,7 @@ impl Gateway {
 
                 if events.contains(EpollFlags::EPOLLIN) {
                     let dispatcher =
-                        |object_id, opcode, args: &_, fds: &mut _, send_buf: &mut _| {
+                        |object_id, opcode, args: &_, fds: FdSource<'_>, send_buf: &mut _| {
                             let global_id =
                                 objects.get(object_id).ok_or(MessageError::InvalidObject)?;
 
