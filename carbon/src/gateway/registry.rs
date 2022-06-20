@@ -1,4 +1,4 @@
-use super::interface::Interface;
+use super::interface::{DispatchState, Interface};
 
 use slotmap::SlotMap;
 
@@ -58,13 +58,10 @@ impl Interface for WlDisplay {
         &mut self,
         opcode: u16,
         args: &[u32],
-        _fds: &mut std::collections::VecDeque<std::os::unix::prelude::RawFd>,
-        send_buf: &mut super::message::MessageBuf<super::message::Write>,
-        _registry: &mut ObjectRegistry,
-        _objects: &mut Vec<Option<GlobalObjectId>>,
+        state: &mut DispatchState,
     ) -> Result<(), super::message::MessageError> {
         if opcode == 0 {
-            let buf = send_buf.allocate(3).unwrap();
+            let buf = state.send_buf.allocate(3).unwrap();
             buf[0] = args[0];
             buf[1] = 0x000C0000;
             buf[2] = 0;

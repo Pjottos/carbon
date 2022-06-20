@@ -1,3 +1,5 @@
+use crate::gateway::interface::DispatchState;
+
 use self::{
     client::Client,
     message::{MessageError, MessageStream},
@@ -212,14 +214,13 @@ impl Gateway {
                                 .ok_or(MessageError::InvalidObject)?;
 
                             if let Some(mut object) = self.registry.take(global_id) {
-                                object.dispatch(
-                                    opcode,
-                                    args,
+                                let mut state = DispatchState {
                                     fds,
                                     send_buf,
-                                    &mut self.registry,
+                                    registry: &mut self.registry,
                                     objects,
-                                )?;
+                                };
+                                object.dispatch(opcode, args, &mut state)?;
                                 self.registry.restore(global_id, object);
                             } else {
                                 // Can happen if object has been deleted but the client has not

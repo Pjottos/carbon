@@ -12,9 +12,13 @@ pub trait Interface {
         &mut self,
         opcode: u16,
         args: &[u32],
-        fds: &mut VecDeque<RawFd>,
-        send_buf: &mut MessageBuf<Write>,
-        registry: &mut ObjectRegistry,
-        objects: &mut Vec<Option<GlobalObjectId>>,
+        state: &mut DispatchState,
     ) -> Result<(), MessageError>;
+}
+
+pub struct DispatchState<'a> {
+    pub fds: &'a mut VecDeque<RawFd>,
+    pub send_buf: &'a mut MessageBuf<Write>,
+    pub registry: &'a mut ObjectRegistry,
+    pub objects: &'a mut Vec<Option<GlobalObjectId>>,
 }
