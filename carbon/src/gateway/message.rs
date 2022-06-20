@@ -213,8 +213,12 @@ impl MessageBuf<Read> {
         let mut idx = 0;
         let mut msg_count = 0;
 
-        // While we have enough bytes for a message header
-        while self.len >= 8 {
+        let res = loop {
+            // While we have enough bytes for a message header
+            if self.len < 8 {
+                break Ok(msg_count);
+            }
+
             let object_id = self.buf[idx];
             let header = self.buf[idx + 1];
             let msg_size = (header >> 16) as usize;
@@ -225,7 +229,7 @@ impl MessageBuf<Read> {
             log::debug!("msg_size  : {}", msg_size);
 
             if msg_size < 8 || msg_size % 4 != 0 {
-                return Err(MessageError::BadFormat);
+                break Err(MessageError::BadFormat);
             }
 
             if self.len >= msg_size {
@@ -234,24 +238,29 @@ impl MessageBuf<Read> {
                 for v in payload {
                     log::debug!("payload   : {:08x}", v,);
                 }
-                dispatcher(object_id, opcode, payload, &mut self.fds, send_buf)?;
+                if let Err(e) = dispatcher(object_id, opcode, payload, &mut self.fds, send_buf) {
+                    break Err(e);
+                }
                 msg_count += 1;
 
                 self.len -= msg_size;
                 idx = msg_end;
             } else {
                 // We haven't received the full message yet
-                break;
+                break Ok(msg_count);
             }
-        }
+        };
 
         if self.len > 0 && idx != 0 {
             // Copy remaining partial message to start of buffer.
             // This is not very likely to happen, and most messages are also quite small.
+            //
+            // It's also possible a request failed in which case we should clean up the
+            // buffer by removing the requests we processed.
             self.buf.copy_within(idx..idx + (self.len + 3) / 4, 0);
         }
 
-        Ok(msg_count)
+        res
     }
 }
 
