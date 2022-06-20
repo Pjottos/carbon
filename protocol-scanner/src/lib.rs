@@ -7,7 +7,7 @@ use std::{fs::File, io::BufReader, path::Path};
 
 mod emit;
 
-pub use emit::emit_protocol;
+pub use emit::CodeBuilder;
 
 pub struct ProtocolParser {
     reader: Reader<BufReader<File>>,
@@ -184,8 +184,7 @@ impl ProtocolParser {
         if let Some((cur_callable, _is_event)) = self.cur_callable.as_mut() {
             match empty.name() {
                 b"arg" => {
-                    let arg =
-                        Self::create_arg(&self.reader, empty);
+                    let arg = Self::create_arg(&self.reader, empty);
                     cur_callable.args.push(arg);
                     true
                 }
@@ -306,10 +305,7 @@ impl ProtocolParser {
         self.cur_callable = Some((callable, is_event));
     }
 
-    fn create_arg(
-        reader: &Reader<BufReader<File>>,
-        start: &BytesStart,
-    ) -> Argument {
+    fn create_arg(reader: &Reader<BufReader<File>>, start: &BytesStart) -> Argument {
         let mut name = None;
         let mut value_type = None;
         let mut interface = None;
@@ -444,10 +440,6 @@ enum ValueType {
         interface: Option<String>,
         optional: bool,
     },
-    NewObjectId {
-        interface: Option<String>,
-        optional: bool,
-    },
     String {
         optional: bool,
     },
@@ -467,11 +459,7 @@ impl ValueType {
             b"int" if !optional => Ok(Self::I32),
             b"uint" if !optional => Ok(Self::U32),
             b"fixed" if !optional => Ok(Self::Fixed),
-            b"object" => Ok(Self::ObjectId {
-                interface,
-                optional,
-            }),
-            b"new_id" => Ok(Self::NewObjectId {
+            b"new_id" | b"object" => Ok(Self::ObjectId {
                 interface,
                 optional,
             }),
