@@ -26,6 +26,21 @@ impl Interface {
             .ok_or(MessageError::InvalidOpcode)
             .and_then(|f| f(self, args, state))
     }
+
+    #[inline]
+    pub fn id(&self) -> u32 {
+        discriminant_value(self) as u32
+    }
+
+    #[inline]
+    pub fn name(&self) -> &'static str {
+        generated::INTERFACE_NAMES[discriminant_value(self) as usize]
+    }
+
+    #[inline]
+    pub fn version(&self) -> u32 {
+        generated::INTERFACE_VERSIONS[discriminant_value(self) as usize]
+    }
 }
 
 pub struct DispatchState<'a> {

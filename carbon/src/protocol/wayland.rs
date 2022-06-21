@@ -9,18 +9,36 @@ pub struct WlDisplay;
 impl WlDisplay {
     pub fn handle_sync(
         &mut self,
-        _state: &mut DispatchState,
-        _callback: ObjectId<WlCallback>,
+        state: &mut DispatchState,
+        callback: ObjectId<WlCallback>,
     ) -> Result<(), MessageError> {
-        todo!("{}::{} not yet implemented", "WlDisplay", "sync")
+        state.objects.register(callback, None)?;
+        wl_callback::emit_done(state.send_buf, callback, 0)?;
+
+        Ok(())
     }
 
     pub fn handle_get_registry(
         &mut self,
-        _state: &mut DispatchState,
-        _registry: ObjectId<WlRegistry>,
+        state: &mut DispatchState,
+        registry: ObjectId<WlRegistry>,
     ) -> Result<(), MessageError> {
-        todo!("{}::{} not yet implemented", "WlDisplay", "get_registry")
+        state
+            .objects
+            .register(registry, Some(state.registry.registry_id()))?;
+
+        for global in state.registry.globals() {
+            let interface = state.registry.get(*global).unwrap();
+            wl_registry::emit_global(
+                state.send_buf,
+                registry,
+                interface.id(),
+                interface.name(),
+                interface.version(),
+            )?;
+        }
+
+        Ok(())
     }
 }
 
@@ -30,6 +48,8 @@ impl WlRegistry {
         &mut self,
         _state: &mut DispatchState,
         _name: u32,
+        _interface: &str,
+        _version: u32,
         _id: ObjectId<Interface>,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlRegistry", "bind")

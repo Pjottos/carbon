@@ -146,6 +146,18 @@ impl MessageStream {
             }
         };
 
+        // if total_count != 0 {
+        //     log::debug!("Flushed buffer:");
+        //     for chunk in &self.send_buf.buf[..total_count / 4] {
+        //         let bytes = chunk.to_ne_bytes();
+        //         log::debug!(
+        //             "{:08x} {}",
+        //             chunk.swap_bytes(),
+        //             String::from_utf8_lossy(&bytes)
+        //         );
+        //     }
+        // }
+
         self.send_buf.shrink(total_count);
 
         res
@@ -244,6 +256,17 @@ impl MessageBuf<Read> {
             if self.len >= msg_size {
                 let msg_end = idx + msg_size / 4;
                 let payload = &self.buf[idx + 2..msg_end];
+
+                // log::debug!("payload");
+                // for chunk in payload {
+                //     let bytes = chunk.to_ne_bytes();
+                //     log::debug!(
+                //         "{:08x} {}",
+                //         chunk.swap_bytes(),
+                //         String::from_utf8_lossy(&bytes)
+                //     );
+                // }
+
                 if let Err(e) = dispatcher(
                     object_id,
                     opcode,
