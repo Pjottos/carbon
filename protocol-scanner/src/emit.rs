@@ -178,21 +178,17 @@ impl CodeBuilder {
                             }
                         }
                         ValueType::String { optional } => {
-                            arg_size = quote! { (#cur_chunk as usize + 3) / 4 };
+                            arg_size = quote! { 1 + (#cur_chunk as usize + 3) / 4 };
                             let create_option = quote! {
                                 #cur_chunk
                                     .checked_sub(1)
-                                    .map(|len| {
-                                        args
-                                            .get(__a + 1..)
-                                            .and_then(|words| {
-                                                cast_slice::<_, u8>(words)
-                                                    .get(..len as usize)
-                                                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                                            })
-                                            .ok_or(MessageError::BadFormat)
+                                    .and_then(|len| {
+                                        args.get(__a + 1..).and_then(|words| {
+                                            cast_slice::<_, u8>(words)
+                                                .get(..len as usize)
+                                                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                                        })
                                     })
-                                    .transpose()?
                             };
                             if *optional {
                                 create_option
@@ -203,7 +199,7 @@ impl CodeBuilder {
                             }
                         }
                         ValueType::Array { optional } => {
-                            arg_size = quote! { (#cur_chunk as usize + 3) / 4 };
+                            arg_size = quote! { 1 + (#cur_chunk as usize + 3) / 4 };
                             if *optional {
                                 todo!("don't know how optional arrays are encoded")
                             } else {
