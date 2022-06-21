@@ -60,7 +60,7 @@ impl ProtocolParser {
     }
 
     fn handle_start(&mut self, start: &BytesStart) -> bool {
-        if let Some((_cur_callable, _is_event)) = self.cur_callable.as_mut() {
+        if self.cur_callable.is_some() {
             match start.name() {
                 b"description" => true,
                 tag => panic!(
@@ -68,7 +68,7 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if let Some(_cur_enum) = self.cur_enum.as_mut() {
+        } else if self.cur_enum.is_some() {
             match start.name() {
                 b"description" => true,
                 tag => panic!(
@@ -76,7 +76,7 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if let Some(_cur_interface) = self.cur_interface.as_mut() {
+        } else if self.cur_interface.is_some() {
             match start.name() {
                 b"description" => true,
                 tag @ (b"event" | b"request") => {
@@ -113,7 +113,7 @@ impl ProtocolParser {
             "found end tag before protocol start"
         );
 
-        if let Some((_cur_callable, _is_event)) = self.cur_callable.as_mut() {
+        if self.cur_callable.is_some() {
             match end.name() {
                 b"description" => true,
                 tag @ (b"event" | b"request") => {
@@ -134,7 +134,7 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if let Some(_cur_enum) = self.cur_enum.as_mut() {
+        } else if self.cur_enum.is_some() {
             match end.name() {
                 b"description" => true,
                 b"enum" => {
@@ -150,7 +150,7 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if let Some(_cur_interface) = self.cur_interface.as_mut() {
+        } else if self.cur_interface.is_some() {
             match end.name() {
                 b"description" => true,
                 b"interface" => {
@@ -213,7 +213,7 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if let Some(_cur_interface) = self.cur_interface.as_mut() {
+        } else if self.cur_interface.is_some() {
             let tag = empty.name();
             panic!(
                 "unexpected empty tag in interface: {}",
