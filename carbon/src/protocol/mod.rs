@@ -10,6 +10,8 @@ pub use generated::Interface;
 
 mod wayland;
 pub use wayland::*;
+mod xdg_shell;
+pub use xdg_shell::*;
 
 impl Interface {
     #[inline]

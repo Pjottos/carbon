@@ -26,6 +26,7 @@ impl ObjectRegistry {
             objects.insert(Some(Interface::WlDataDeviceManager(WlDataDeviceManager))),
             objects.insert(Some(Interface::WlSeat(WlSeat))),
             objects.insert(Some(Interface::WlSubcompositor(WlSubcompositor))),
+            objects.insert(Some(Interface::XdgWmBase(XdgWmBase))),
         ];
 
         Self {
