@@ -50,11 +50,17 @@ pub struct ObjectId<T> {
 }
 
 impl<T> ObjectId<T> {
+    #[inline]
     pub fn new(raw: u32) -> Option<Self> {
         NonZeroU32::new(raw).map(|value| Self {
             value,
             phantom: PhantomData,
         })
+    }
+
+    #[inline]
+    pub fn raw(self) -> u32 {
+        self.value.get()
     }
 }
 

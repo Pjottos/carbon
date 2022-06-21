@@ -284,13 +284,25 @@ impl MessageBuf<Write> {
     }
 
     #[inline]
-    pub fn allocate(&mut self, chunk_count: usize) -> Option<&mut [u32]> {
+    pub fn allocate(&mut self, chunk_count: usize) -> Result<&mut [u32], MessageError> {
         let new_len = self.len + chunk_count * 4;
-        (new_len <= BUF_SIZE).then(|| {
-            let res = &mut self.buf[self.len / 4..new_len / 4];
-            self.len = new_len;
-            res
-        })
+        (new_len <= BUF_SIZE)
+            .then(|| {
+                let res = &mut self.buf[self.len / 4..new_len / 4];
+                self.len = new_len;
+                res
+            })
+            .ok_or(MessageError::TooLarge)
+    }
+
+    #[inline]
+    pub fn push_fd(&mut self, fd: RawFd) -> Result<(), MessageError> {
+        if self.fds.len() < MAX_FDS_OUT {
+            self.fds.push_back(fd);
+            Ok(())
+        } else {
+            Err(MessageError::TooLarge)
+        }
     }
 
     fn shrink(&mut self, count: usize) {

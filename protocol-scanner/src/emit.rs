@@ -69,13 +69,13 @@ impl CodeBuilder {
         quote! {
             use crate::{
                 gateway::{
-                    message::MessageError,
+                    message::{MessageBuf, Write, MessageError},
                     registry::ObjectId,
                 },
                 protocol::{self, DispatchState},
             };
             use fixed::types::I24F8;
-            use bytemuck::cast_slice;
+            use bytemuck::{cast_slice, cast_slice_mut};
             use std::os::unix::io::RawFd;
 
             pub type RequestDemarshaller = fn #demarshaller_signature;
@@ -252,16 +252,122 @@ impl CodeBuilder {
                 }
             });
 
-            let events = interface.events.iter().map(|event| {
+            let events = interface.events.iter().enumerate().map(|(opcode, event)| {
                 let fn_name = format_ident!("emit_{}", &event.name);
                 let args = event.args.iter().map(|arg| {
                     let name = format_ident!("{}", &arg.name);
                     let value_type = arg.value_type.rust_type(false);
                     quote! { #name: #value_type }
                 });
+                let lengths = event.args.iter().map(|arg| {
+                    let name = format_ident!("{}", &arg.name);
+                    match arg.value_type {
+                        ValueType::I32 =>  quote! { 1 },
+                        ValueType::U32 =>  quote! { 1 },
+                        ValueType::Enum { .. } =>  quote! { 1 },
+                        ValueType::Fixed =>  quote! { 1 },
+                        ValueType::ObjectId { .. } => quote! { 1 },
+                        ValueType::String { optional } => {
+                            if optional {
+                                quote! { 1 + #name.map_or(0, |v| (v.len() + 3) / 4) }
+                            } else {
+                                quote! { 1 + (#name.len() + 3) / 4 }
+                            }
+                        }
+                        ValueType::Array { optional } => {
+                            if optional {
+                                quote! { 1 + #name.map_or(0, |v| (v.len() + 3) / 4) }
+                            } else {
+                                quote! { 1 + (#name.len() + 3) / 4 }
+                            }
+                        }
+                        ValueType::Fd => quote! { 0 },
+                    }
+                });
+                let mut fd_pushes = vec![];
+                let write_args = event.args.iter().enumerate().map(|(i, arg)| {
+                    let i = 2 + i;
+                    let name = format_ident!("{}", &arg.name);
+                    match arg.value_type {
+                        ValueType::I32 => quote! { __buf[#i] = #name as u32; },
+                        ValueType::U32 => quote! { __buf[#i] = #name; },
+                        ValueType::Enum { .. } => quote! { __buf[#i] = #name as u32; },
+                        ValueType::Fixed => quote! {
+                            __buf[#i] = u32::from_ne_bytes(#name.to_ne_bytes());
+                        },
+                        ValueType::ObjectId { optional, .. } => {
+                            if optional {
+                                quote! { __buf[#i] = #name.map_or(0, |v| v.raw()); }
+                            } else {
+                                quote! { __buf[#i] = #name.raw(); }
+                            }
+                        }
+                        ValueType::String { optional } => {
+                            let write_str = quote! {
+                                __buf[#i] = #name.len() as u32 + 1;
+                                let __bytes = cast_slice_mut(&mut __buf[#i + 1..]);
+                                __bytes[..#name.len()].copy_from_slice(#name.as_bytes());
+                                __bytes[#name.len()] = 0;
+                                // Leaking the value of the padding bytes is fine because
+                                // the buffer is only used by one client.
+                            };
+                            if optional {
+                                quote! {
+                                    if let Some(#name) = #name {
+                                        #write_str
+                                    } else {
+                                        __buf[#i] = 0;
+                                    }
+                                }
+                            } else {
+                                write_str
+                            }
+                        }
+                        ValueType::Array { optional } => {
+                            let write_array = quote! {
+                                __buf[#i] = #name.len() as u32;
+                                let __bytes = cast_slice_mut(&mut __buf[#i + 1..]);
+                                __bytes[..#name.len()].copy_from_slice(#name);
+                                __bytes[#name.len()] = 0;
+                                // Leaking the value of the padding bytes is fine because
+                                // the buffer is only used by one client.
+                            };
+                            if optional {
+                                quote! {
+                                    if let Some(#name) = #name {
+                                        #write_array
+                                    } else {
+                                        __buf[#i] = 0;
+                                    }
+                                }
+                            } else {
+                                write_array
+                            }
+                        }
+                        ValueType::Fd => {
+                            fd_pushes.push(name);
+                            TokenStream::default()
+                        }
+                    }
+                });
 
+                let opcode = u16::try_from(opcode).expect("Opcode does not fit in u16");
                 quote! {
-                    pub fn #fn_name(self_id: ObjectId<protocol::#interface_struct>, #(#args),*) {}
+                    pub fn #fn_name(
+                        send_buf: &mut MessageBuf<Write>,
+                        self_id: ObjectId<protocol::#interface_struct>,
+                        #(#args),*
+                    ) -> Result<(), MessageError> {
+                        let __len = 2 #( + #lengths)*;
+                        let __buf = send_buf.allocate(__len)?;
+                        __buf[0] = self_id.raw();
+                        let __msg_len = u16::try_from(__len * 4).map_err(|_| MessageError::TooLarge)?;
+                        __buf[1] = u32::from(#opcode) | (u32::from(__msg_len) << 16);
+                        #(#write_args)*
+                        #(send_buf.push_fd(#fd_pushes)?;)*
+
+                        Ok(())
+                    }
                 }
             });
 
@@ -308,7 +414,7 @@ impl CodeBuilder {
     }
 }
 
-pub fn emit_stubs(protocol: Protocol) -> (String, TokenStream) {
+pub fn emit_stubs(protocol: &Protocol) -> TokenStream {
     let interfaces = protocol.interfaces.iter().map(|interface| {
         let interface_name = interface.name.to_case(Case::Pascal);
         let requests = interface.requests.iter().map(|request| {
@@ -348,5 +454,5 @@ pub fn emit_stubs(protocol: Protocol) -> (String, TokenStream) {
 
         #(#interfaces)*
     };
-    (protocol.name, tokens)
+    tokens
 }
