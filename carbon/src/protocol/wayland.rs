@@ -69,14 +69,17 @@ pub struct WlCompositor;
 impl WlCompositor {
     pub fn handle_create_surface(
         &mut self,
-        _state: &mut DispatchState,
-        _id: ObjectId<WlSurface>,
+        state: &mut DispatchState,
+        id: ObjectId<WlSurface>,
     ) -> Result<(), MessageError> {
-        todo!(
-            "{}::{} not yet implemented",
-            "WlCompositor",
-            "create_surface"
-        )
+        let surface = WlSurface;
+        let global_id = state.registry.insert(Interface::WlSurface(surface));
+        let res = state.objects.register(id, Some(global_id));
+        if res.is_err() {
+            let _surface = state.registry.remove(global_id).unwrap();
+        }
+
+        res
     }
 
     pub fn handle_create_region(

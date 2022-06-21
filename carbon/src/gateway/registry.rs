@@ -74,6 +74,18 @@ impl ObjectRegistry {
 
         *entry = Some(object);
     }
+
+    #[inline]
+    pub fn insert(&mut self, object: Interface) -> GlobalObjectId {
+        self.objects.insert(Some(object))
+    }
+
+    #[inline]
+    pub fn remove(&mut self, id: GlobalObjectId) -> Option<Interface> {
+        self.objects
+            .remove(id)
+            .map(|entry| entry.expect("Tried to remove object that was temporarily taken"))
+    }
 }
 
 #[repr(transparent)]
