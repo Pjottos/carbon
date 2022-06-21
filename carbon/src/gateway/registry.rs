@@ -47,8 +47,11 @@ impl ObjectRegistry {
     }
 
     #[inline]
-    pub fn globals(&self) -> &[GlobalObjectId] {
-        &self.globals
+    pub fn globals(&self) -> impl Iterator<Item = (GlobalObjectId, &Interface)> {
+        self.globals
+            .iter()
+            .copied()
+            .map(|id| (id, self.get(id).unwrap()))
     }
 
     #[inline]

@@ -257,15 +257,18 @@ impl MessageBuf<Read> {
                 let msg_end = idx + msg_size / 4;
                 let payload = &self.buf[idx + 2..msg_end];
 
-                // log::debug!("payload");
+                // log::debug!("object : {:?}", object_id);
+                // log::debug!("size   : {:?}", msg_size);
+                // log::debug!("opcode : {:?}", opcode);
                 // for chunk in payload {
                 //     let bytes = chunk.to_ne_bytes();
                 //     log::debug!(
-                //         "{:08x} {}",
+                //         "payload: {:08x} {}",
                 //         chunk.swap_bytes(),
                 //         String::from_utf8_lossy(&bytes)
                 //     );
                 // }
+                // log::debug!("------------------------------");
 
                 if let Err(e) = dispatcher(
                     object_id,

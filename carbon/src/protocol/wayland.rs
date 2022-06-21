@@ -27,8 +27,7 @@ impl WlDisplay {
             .objects
             .register(registry, Some(state.registry.registry_id()))?;
 
-        for global in state.registry.globals() {
-            let interface = state.registry.get(*global).unwrap();
+        for (_, interface) in state.registry.globals() {
             wl_registry::emit_global(
                 state.send_buf,
                 registry,
@@ -46,13 +45,21 @@ pub struct WlRegistry;
 impl WlRegistry {
     pub fn handle_bind(
         &mut self,
-        _state: &mut DispatchState,
-        _name: u32,
-        _interface: &str,
-        _version: u32,
-        _id: ObjectId<Interface>,
+        state: &mut DispatchState,
+        name: u32,
+        interface: &str,
+        version: u32,
+        id: ObjectId<Interface>,
     ) -> Result<(), MessageError> {
-        todo!("{}::{} not yet implemented", "WlRegistry", "bind")
+        let (global_id, _) = state
+            .registry
+            .globals()
+            .find(|(_, i)| i.id() == name && i.name() == interface && i.version() >= version)
+            .ok_or(MessageError::BadFormat)?;
+
+        state.objects.register(id, Some(global_id))?;
+
+        Ok(())
     }
 }
 
