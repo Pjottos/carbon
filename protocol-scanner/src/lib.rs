@@ -68,12 +68,18 @@ impl ProtocolParser {
                     String::from_utf8_lossy(tag)
                 ),
             }
-        } else if self.cur_enum.is_some() {
+        } else if let Some(cur_enum) = self.cur_enum.as_mut() {
             match start.name() {
                 b"description" => true,
+                b"entry" => {
+                    let entry = Self::create_enum_entry(&self.reader, start);
+                    cur_enum.entries.push(entry);
+                    true
+                }
                 tag => panic!(
-                    "unexpected start tag in enum: {}",
-                    String::from_utf8_lossy(tag)
+                    "unexpected start tag in enum: {} {:?}",
+                    String::from_utf8_lossy(tag),
+                    self.cur_enum
                 ),
             }
         } else if self.cur_interface.is_some() {
@@ -145,6 +151,7 @@ impl ProtocolParser {
                         .push(self.cur_enum.take().unwrap());
                     true
                 }
+                b"entry" => true,
                 tag => panic!(
                     "unexpected end tag in enum: {}",
                     String::from_utf8_lossy(tag)
