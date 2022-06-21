@@ -1,19 +1,27 @@
-use protocol_scanner::{CodeBuilder, ProtocolParser};
+use protocol_scanner::{emit_stubs, ProtocolParser};
 
-use std::fs;
+use std::{env, fs};
 
 fn main() {
     let mut buf = vec![];
-    let mut builder = CodeBuilder::default();
 
-    for entry in fs::read_dir("protocols").unwrap() {
-        let entry = entry.unwrap();
-        let mut parser = ProtocolParser::new(&entry.path());
-        while parser.next(&mut buf) {}
-        let protocol = parser.finish();
-        builder.add_protocol(protocol);
+    let mut args = env::args();
+    args.next();
+    let protocol_path = args.next().expect("first arg should be protocol path");
+    let target_path = args
+        .next()
+        .expect("second arg should be target path or '-' for stdout");
+
+    let mut parser = ProtocolParser::new(protocol_path.as_ref());
+    while parser.next(&mut buf) {}
+    let protocol = parser.finish();
+
+    let (_name, tokens) = emit_stubs(protocol);
+
+    if target_path == "-" {
+        println!("{}", tokens);
+    } else {
+        let code = format!("{}", tokens);
+        fs::write(target_path, code.as_bytes()).expect("failed to write stubs");
     }
-
-    let token_stream = builder.build();
-    println!("{}", token_stream);
 }

@@ -1,13 +1,16 @@
+use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
 use quick_xml::{
     events::{BytesEnd, BytesStart, Event},
     Reader,
 };
+use quote::{format_ident, quote};
 
 use std::{fs::File, io::BufReader, path::Path};
 
 mod emit;
 
-pub use emit::CodeBuilder;
+pub use emit::{emit_stubs, CodeBuilder};
 
 pub struct ProtocolParser {
     reader: Reader<BufReader<File>>,
@@ -184,7 +187,11 @@ impl ProtocolParser {
         if let Some((cur_callable, _is_event)) = self.cur_callable.as_mut() {
             match empty.name() {
                 b"arg" => {
-                    let arg = Self::create_arg(&self.reader, empty);
+                    let arg = Self::create_arg(
+                        &self.reader,
+                        &self.cur_interface.as_ref().unwrap().name,
+                        empty,
+                    );
                     cur_callable.args.push(arg);
                     true
                 }
@@ -305,7 +312,11 @@ impl ProtocolParser {
         self.cur_callable = Some((callable, is_event));
     }
 
-    fn create_arg(reader: &Reader<BufReader<File>>, start: &BytesStart) -> Argument {
+    fn create_arg(
+        reader: &Reader<BufReader<File>>,
+        interface_name: &str,
+        start: &BytesStart,
+    ) -> Argument {
         let mut name = None;
         let mut value_type = None;
         let mut interface = None;
@@ -326,9 +337,9 @@ impl ProtocolParser {
                 b"enum" => {
                     let full = attribute.unescape_and_decode_value(reader).unwrap();
                     if let Some((interface, name)) = full.split_once('.') {
-                        enum_path = Some((Some(interface.to_owned()), name.to_owned()));
+                        enum_path = Some((interface.to_owned(), name.to_owned()));
                     } else {
-                        enum_path = Some((None, full));
+                        enum_path = Some((interface_name.to_owned(), full));
                     }
                 }
                 b"allow-null" => {
@@ -432,7 +443,7 @@ enum ValueType {
     I32,
     U32,
     Enum {
-        interface: Option<String>,
+        interface: String,
         name: String,
     },
     Fixed,
@@ -467,6 +478,55 @@ impl ValueType {
             b"array" => Ok(Self::Array { optional }),
             b"fd" if !optional => Ok(Self::Fd),
             _ => Err(InvalidValueType),
+        }
+    }
+
+    fn rust_type(&self, is_stub: bool) -> TokenStream {
+        match self {
+            ValueType::I32 => quote! { i32 },
+            ValueType::U32 => quote! { u32 },
+            ValueType::Enum { interface, name } => {
+                let name = format_ident!("{}", name.to_case(Case::Pascal));
+                let interface = format_ident!("{}", interface);
+                quote! { #interface::#name }
+            }
+            ValueType::Fixed => quote! { I24F8 },
+            ValueType::ObjectId {
+                interface,
+                optional,
+            } => {
+                let id_type = if let Some(interface) = interface.as_ref() {
+                    let interface = format_ident!("{}", interface.to_case(Case::Pascal));
+                    if is_stub {
+                        quote! { ObjectId<#interface> }
+                    } else {
+                        quote! { ObjectId<protocol::#interface> }
+                    }
+                } else {
+                    quote! { ObjectId<Interface> }
+                };
+
+                if *optional {
+                    quote! { Option<#id_type> }
+                } else {
+                    quote! { #id_type }
+                }
+            }
+            ValueType::String { optional } => {
+                if *optional {
+                    quote! { Option<&str> }
+                } else {
+                    quote! { &str }
+                }
+            }
+            ValueType::Array { optional } => {
+                if *optional {
+                    quote! { Option<&[u8]> }
+                } else {
+                    quote! { &[u8] }
+                }
+            }
+            ValueType::Fd => quote! { RawFd },
         }
     }
 }

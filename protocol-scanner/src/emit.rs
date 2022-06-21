@@ -156,10 +156,8 @@ impl CodeBuilder {
                         ValueType::Enum { interface, name } => {
                             arg_size = quote! { 1 };
                             let name = format_ident!("{}", name.to_case(Case::Pascal));
-                            let enum_ty = match interface.as_ref().map(|i| format_ident!("{}", i)) {
-                                Some(interface) => quote! { #interface::#name },
-                                None => quote! { #name },
-                            };
+                            let interface = format_ident!("{}", interface);
+                            let enum_ty = quote! { #interface::#name };
                             quote! { #enum_ty::try_from(#cur_chunk)? }
                         }
                         ValueType::Fixed => {
@@ -258,57 +256,7 @@ impl CodeBuilder {
                 let fn_name = format_ident!("emit_{}", &event.name);
                 let args = event.args.iter().map(|arg| {
                     let name = format_ident!("{}", &arg.name);
-                    let value_type = match &arg.value_type {
-                        ValueType::I32 => quote! { i32 },
-                        ValueType::U32 => quote! { u32 },
-                        ValueType::Enum { interface, name } => {
-                            let name = format_ident!("{}", name.to_case(Case::Pascal));
-                            if let Some(interface) = interface.as_ref().map(|i| format_ident!("{}", i))
-                            {
-                                quote! {
-                                    #interface::#name
-                                }
-                            } else {
-                                quote! {
-                                    #name
-                                }
-                            }
-                        }
-                        ValueType::Fixed => quote! { I24F8 },
-                        ValueType::ObjectId {
-                            interface,
-                            optional,
-                        } => {
-                            let id_type = if let Some(interface) = interface.as_ref() {
-                                let interface = format_ident!("{}", interface.to_case(Case::Pascal));
-                                quote! { ObjectId<protocol::#interface> }
-                            } else {
-                                quote! { ObjectId<Interface> }
-                            };
-
-                            if *optional {
-                                quote! { Option<#id_type> }
-                            } else {
-                                quote! { #id_type }
-                            }
-                        }
-                        ValueType::String { optional } => {
-                            if *optional {
-                                quote! { Option<&str> }
-                            } else {
-                                quote! { &str }
-                            }
-                        }
-                        ValueType::Array { optional } => {
-                            if *optional {
-                                quote! { Option<&[u8]> }
-                            } else {
-                                quote! { &[u8] }
-                            }
-                        }
-                        ValueType::Fd => quote! { RawFd },
-                    };
-
+                    let value_type = arg.value_type.rust_type(false);
                     quote! { #name: #value_type }
                 });
 
@@ -358,4 +306,47 @@ impl CodeBuilder {
 
         self.protocols.push(protocol_tokens);
     }
+}
+
+pub fn emit_stubs(protocol: Protocol) -> (String, TokenStream) {
+    let interfaces = protocol.interfaces.iter().map(|interface| {
+        let interface_name = interface.name.to_case(Case::Pascal);
+        let requests = interface.requests.iter().map(|request| {
+            let args = request.args.iter().map(|arg| {
+                let name = format_ident!("_{}", &arg.name);
+                let value_type = arg.value_type.rust_type(true);
+
+                quote! { #name: #value_type }
+            });
+
+            let request_name = &request.name;
+            let fn_name = format_ident!("handle_{}", request.name);
+            quote! {
+                pub fn #fn_name(&mut self, _state: &mut DispatchState, #(#args),*) -> Result<(), MessageError> {
+                    todo!("{}::{} not yet implemented", #interface_name, #request_name)
+                }
+            }
+        });
+
+        let interface_name = format_ident!("{}", interface_name);
+        quote! {
+            pub struct #interface_name;
+
+            impl #interface_name {
+                #(#requests)*
+            }
+        }
+    });
+
+    let tokens = quote! {
+        use crate::{
+            protocol::{generated::*, Interface, DispatchState},
+            gateway::{registry::ObjectId, message::MessageError},
+        };
+
+        use std::os::unix::io::RawFd;
+
+        #(#interfaces)*
+    };
+    (protocol.name, tokens)
 }
