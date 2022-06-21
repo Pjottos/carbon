@@ -269,9 +269,9 @@ impl CodeBuilder {
                         ValueType::ObjectId { .. } => quote! { 1 },
                         ValueType::String { optional } => {
                             if optional {
-                                quote! { 1 + #name.map_or(0, |v| (v.len() + 3) / 4) }
+                                quote! { 1 + #name.map_or(0, |v| (v.len() + 1 + 3) / 4) }
                             } else {
-                                quote! { 1 + (#name.len() + 3) / 4 }
+                                quote! { 1 + (#name.len() + 1 + 3) / 4 }
                             }
                         }
                         ValueType::Array { optional } => {
@@ -285,27 +285,26 @@ impl CodeBuilder {
                     }
                 });
                 let mut fd_pushes = vec![];
-                let write_args = event.args.iter().enumerate().map(|(i, arg)| {
-                    let i = 2 + i;
+                let write_args = event.args.iter().zip(lengths.clone()).map(|(arg, length)| {
                     let name = format_ident!("{}", &arg.name);
-                    match arg.value_type {
-                        ValueType::I32 => quote! { __buf[#i] = #name as u32; },
-                        ValueType::U32 => quote! { __buf[#i] = #name; },
-                        ValueType::Enum { .. } => quote! { __buf[#i] = #name as u32; },
+                    let assign = match arg.value_type {
+                        ValueType::I32 => quote! { __buf[__i] = #name as u32; },
+                        ValueType::U32 => quote! { __buf[__i] = #name; },
+                        ValueType::Enum { .. } => quote! { __buf[__i] = #name as u32; },
                         ValueType::Fixed => quote! {
-                            __buf[#i] = u32::from_ne_bytes(#name.to_ne_bytes());
+                            __buf[__i] = u32::from_ne_bytes(#name.to_ne_bytes());
                         },
                         ValueType::ObjectId { optional, .. } => {
                             if optional {
-                                quote! { __buf[#i] = #name.map_or(0, |v| v.raw()); }
+                                quote! { __buf[__i] = #name.map_or(0, |v| v.raw()); }
                             } else {
-                                quote! { __buf[#i] = #name.raw(); }
+                                quote! { __buf[__i] = #name.raw(); }
                             }
                         }
                         ValueType::String { optional } => {
                             let write_str = quote! {
-                                __buf[#i] = #name.len() as u32 + 1;
-                                let __bytes = cast_slice_mut(&mut __buf[#i + 1..]);
+                                __buf[__i] = #name.len() as u32 + 1;
+                                let __bytes = cast_slice_mut(&mut __buf[__i + 1..]);
                                 __bytes[..#name.len()].copy_from_slice(#name.as_bytes());
                                 __bytes[#name.len()] = 0;
                                 // Leaking the value of the padding bytes is fine because
@@ -316,7 +315,7 @@ impl CodeBuilder {
                                     if let Some(#name) = #name {
                                         #write_str
                                     } else {
-                                        __buf[#i] = 0;
+                                        __buf[__i] = 0;
                                     }
                                 }
                             } else {
@@ -325,10 +324,9 @@ impl CodeBuilder {
                         }
                         ValueType::Array { optional } => {
                             let write_array = quote! {
-                                __buf[#i] = #name.len() as u32;
-                                let __bytes = cast_slice_mut(&mut __buf[#i + 1..]);
+                                __buf[__i] = #name.len() as u32;
+                                let __bytes = cast_slice_mut(&mut __buf[__i + 1..]);
                                 __bytes[..#name.len()].copy_from_slice(#name);
-                                __bytes[#name.len()] = 0;
                                 // Leaking the value of the padding bytes is fine because
                                 // the buffer is only used by one client.
                             };
@@ -337,7 +335,7 @@ impl CodeBuilder {
                                     if let Some(#name) = #name {
                                         #write_array
                                     } else {
-                                        __buf[#i] = 0;
+                                        __buf[__i] = 0;
                                     }
                                 }
                             } else {
@@ -348,6 +346,11 @@ impl CodeBuilder {
                             fd_pushes.push(name);
                             TokenStream::default()
                         }
+                    };
+
+                    quote! {
+                        #assign
+                        __i += #length;
                     }
                 });
 
@@ -363,6 +366,7 @@ impl CodeBuilder {
                         __buf[0] = self_id.raw();
                         let __msg_len = u16::try_from(__len * 4).map_err(|_| MessageError::TooLarge)?;
                         __buf[1] = u32::from(#opcode) | (u32::from(__msg_len) << 16);
+                        let mut __i = 2;
                         #(#write_args)*
                         #(send_buf.push_fd(#fd_pushes)?;)*
 
