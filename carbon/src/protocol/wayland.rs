@@ -55,7 +55,9 @@ impl WlRegistry {
             .registry
             .globals()
             .find(|(_, i)| i.id() == name && i.name() == interface && i.version() >= version)
-            .ok_or(MessageError::BadFormat)?;
+            .ok_or_else(|| {
+                MessageError::BadRequest("attempt to bind non-existent global".to_owned())
+            })?;
 
         state.objects.register(id, Some(global_id))?;
 

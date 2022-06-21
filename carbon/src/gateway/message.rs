@@ -1,7 +1,6 @@
 use crate::{gateway::registry::ObjectId, protocol::Interface};
 
 use nix::{
-    errno::Errno,
     sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags},
     unistd::close,
 };
@@ -15,25 +14,20 @@ use std::{
 
 const MAX_FDS_OUT: usize = 28;
 
-/// Error returned when an invalid message was received.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, thiserror::Error)]
 pub enum MessageError {
-    TooLarge,
-    BadFormat,
+    #[error("out of memory")]
+    OutOfMemory,
+    #[error("request had bad wire format: {0}")]
+    BadFormat(String),
+    #[error("bad request: {0}")]
+    BadRequest(String),
+    #[error("bad object id")]
     InvalidObject,
+    #[error("bad request opcode")]
     InvalidOpcode,
-}
-
-impl From<MessageError> for io::Error {
-    fn from(e: MessageError) -> Self {
-        let text = match e {
-            MessageError::TooLarge => "Wayland message did not fit in buffer",
-            MessageError::BadFormat => "Wayland message had incorrect format",
-            MessageError::InvalidObject => "Wayland message had invalid object id",
-            MessageError::InvalidOpcode => "Wayland message had invalid opcode for object",
-        };
-        io::Error::new(io::ErrorKind::InvalidData, text)
-    }
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
 }
 
 pub struct MessageStream {
@@ -57,7 +51,7 @@ impl MessageStream {
         }
     }
 
-    pub fn receive<D>(&mut self, mut dispatcher: D) -> io::Result<usize>
+    pub fn receive<D>(&mut self, mut dispatcher: D) -> Result<usize, MessageError>
     where
         D: FnMut(
             ObjectId<Interface>,
@@ -81,7 +75,7 @@ impl MessageStream {
                         // Stream is closed, assume that there are no whole messages
                         // still in the buffer since they should have been processed
                         // in the last invocation.
-                        return Ok(0);
+                        break Ok(0);
                     }
 
                     self.receive_buf.grow(msg.bytes);
@@ -91,28 +85,26 @@ impl MessageStream {
                         }
                     }
                 }
-                Err(e) if e == Errno::EINTR => {
-                    // Should retry
-                    continue;
-                }
-                Err(e) => return Err(e.into()),
+                Err(e) => break Err(io::Error::from(e).into()),
             }
 
             let should_read = self.receive_buf.is_full();
-            count += self
+            let new_count = self
                 .receive_buf
                 .deserialize_messages(&mut dispatcher, &mut self.send_buf)?;
-            if count == 0 {
-                return if should_read {
-                    Err(MessageError::TooLarge.into())
+            count += new_count;
+
+            if new_count == 0 {
+                break if should_read {
+                    Err(MessageError::OutOfMemory)
                 } else {
-                    Err(io::ErrorKind::WouldBlock.into())
+                    Err(io::Error::from(io::ErrorKind::WouldBlock).into())
                 };
-            }
-            if should_read {
+            } else if should_read {
                 continue;
             }
-            return Ok(count);
+
+            break Ok(count);
         }
     }
 
@@ -137,10 +129,6 @@ impl MessageStream {
                 Ok(count) => {
                     total_count += count;
                     self.send_buf.fds.clear();
-                }
-                Err(e) if e == Errno::EINTR => {
-                    // Should retry
-                    continue;
                 }
                 Err(e) => break Err(e.into()),
             }
@@ -250,7 +238,9 @@ impl MessageBuf<Read> {
             let opcode = header as u16;
 
             if msg_size < 8 || msg_size % 4 != 0 {
-                break Err(MessageError::BadFormat);
+                break Err(MessageError::BadFormat(
+                    "message size < 8 or not a multiple of 4".to_owned(),
+                ));
             }
 
             if self.len >= msg_size {
@@ -318,7 +308,7 @@ impl MessageBuf<Write> {
                 self.len = new_len;
                 res
             })
-            .ok_or(MessageError::TooLarge)
+            .ok_or(MessageError::OutOfMemory)
     }
 
     #[inline]
@@ -327,7 +317,7 @@ impl MessageBuf<Write> {
             self.fds.push_back(fd);
             Ok(())
         } else {
-            Err(MessageError::TooLarge)
+            Err(MessageError::OutOfMemory)
         }
     }
 

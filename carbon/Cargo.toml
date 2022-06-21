@@ -12,6 +12,7 @@ bytemuck = "1"
 num_enum = "0.5"
 slotmap = "1"
 fixed = "1"
+thiserror = "1"
 
 [build-dependencies]
 protocol-scanner = { path = "../protocol-scanner" }

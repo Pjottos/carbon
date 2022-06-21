@@ -8,6 +8,7 @@ use crate::{
 };
 
 use nix::{
+    errno::Errno,
     fcntl::{flock, FlockArg},
     sys::{epoll::*, socket::*},
     unistd::close,
@@ -149,11 +150,7 @@ impl Gateway {
                             .try_into()
                             .expect("Received invalid event data");
 
-                        match self.handle_epoll(token, event.events()) {
-                            Ok(_) => (),
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
-                            Err(e) => panic!("Unhandled IO error: {}", e),
-                        }
+                        self.handle_epoll(token, event.events());
                     }
                 }
                 Err(e) => panic!("Error waiting for epoll event: {}", e),
@@ -161,15 +158,22 @@ impl Gateway {
         }
     }
 
-    fn handle_epoll(&mut self, token: EpollToken, events: EpollFlags) -> io::Result<()> {
+    fn handle_epoll(&mut self, token: EpollToken, events: EpollFlags) {
         use EpollTokenKind::*;
 
         match token.kind {
             NewConnection => {
-                let stream_fd = accept4(
+                let stream_fd = match accept4(
                     self.listener_fd,
                     SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
-                )?;
+                ) {
+                    Ok(fd) => fd,
+                    Err(Errno::EWOULDBLOCK) => return,
+                    Err(e) => {
+                        log::error!("Failed to accept socket connection: {}", e);
+                        return;
+                    }
+                };
 
                 let client_id = self.next_client_id();
                 let mut client_data_event = EpollEvent::new(
@@ -180,12 +184,16 @@ impl Gateway {
                     }
                     .into(),
                 );
-                epoll_ctl(
+                if let Err(e) = epoll_ctl(
                     self.epoll_fd,
                     EpollOp::EpollCtlAdd,
                     stream_fd,
                     Some(&mut client_data_event),
-                )?;
+                ) {
+                    log::error!("Failed to register stream with epoll: {}", e);
+                    let _ = close(stream_fd);
+                    return;
+                }
 
                 let client = Client::new(MessageStream::new(stream_fd), self.registry.display_id());
                 match self.clients.get_mut(client_id as usize) {
@@ -201,8 +209,8 @@ impl Gateway {
                 {
                     Some(client) => client.stream_and_objects_mut(),
                     None => {
-                        log::warn!("Received ready event for non-existing client");
-                        return Ok(());
+                        log::error!("Received ready event for non-existing client");
+                        return;
                     }
                 };
 
@@ -235,17 +243,17 @@ impl Gateway {
                         Ok(0) => {
                             log::debug!("Client disconnected");
                             self.delete_client(token.id);
-                            return Ok(());
+                            return;
                         }
                         Ok(count) => {
                             log::debug!("Processed {} requests", count);
                         }
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
+                        Err(MessageError::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => (),
                         Err(e) => {
                             log::error!("Error while receiving message: {}", e);
                             log::error!("Dropping this client");
                             self.delete_client(token.id);
-                            return Ok(());
+                            return;
                         }
                     }
                 }
@@ -260,14 +268,11 @@ impl Gateway {
                             log::error!("Error while flushing messages: {}", e);
                             log::error!("Dropping this client");
                             self.delete_client(token.id);
-                            return Ok(());
                         }
                     }
                 }
             }
         }
-
-        Ok(())
     }
 
     fn next_client_id(&self) -> u32 {

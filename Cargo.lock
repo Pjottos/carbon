@@ -58,6 +58,7 @@ dependencies = [
  "num_enum",
  "protocol-scanner",
  "slotmap",
+ "thiserror",
 ]
 
 [[package]]

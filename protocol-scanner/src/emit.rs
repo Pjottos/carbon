@@ -130,7 +130,7 @@ impl CodeBuilder {
                         fn try_from(v: u32) -> Result<Self, MessageError> {
                             match v {
                                 #(#match_entries),*,
-                                _ => Err(MessageError::BadFormat),
+                                _ => Err(MessageError::BadFormat(format!("{v} is not a valid value for enum #name"))),
                             }
                         }
                     }
@@ -141,7 +141,7 @@ impl CodeBuilder {
                 let extract_args = request.args.iter().map(|arg| {
                     let arg_size;
                     let cur_chunk = quote! {
-                        (*args.get(__a).ok_or(MessageError::BadFormat)?)
+                        (*args.get(__a).ok_or_else(|| MessageError::BadFormat("argument array too short".to_owned()))?)
                     };
                     let name = format_ident!("{}", &arg.name);
                     let extract = match &arg.value_type {
@@ -174,7 +174,7 @@ impl CodeBuilder {
                             if *optional {
                                 option
                             } else {
-                                quote! { #option.ok_or(MessageError::BadFormat)? }
+                                quote! { #option.ok_or_else(|| MessageError::BadFormat("null object id where it is not allowed".to_owned()))? }
                             }
                         }
                         ValueType::String { optional } => {
@@ -182,19 +182,21 @@ impl CodeBuilder {
                             let create_option = quote! {
                                 #cur_chunk
                                     .checked_sub(1)
-                                    .and_then(|len| {
+                                    .map(|len| {
                                         args.get(__a + 1..).and_then(|words| {
                                             cast_slice::<_, u8>(words)
                                                 .get(..len as usize)
                                                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
                                         })
+                                        .ok_or_else(|| MessageError::BadFormat("invalid string".to_owned()))
                                     })
+                                    .transpose()?
                             };
                             if *optional {
                                 create_option
                             } else {
                                 quote! {
-                                    #create_option.ok_or(MessageError::BadFormat)?
+                                    #create_option.ok_or_else(|| MessageError::BadFormat("null string where it is not allowed".to_owned()))?
                                 }
                             }
                         }
@@ -205,19 +207,19 @@ impl CodeBuilder {
                             } else {
                                 quote! {
                                     args
-                                        .get(__a + 1..)
+                                        .get((__a + 1).min(args.len() - 1)..)
                                         .and_then(|words| {
                                             cast_slice::<_, u8>(words)
                                                 .get(..#cur_chunk as usize)
                                         })
-                                        .ok_or(MessageError::BadFormat)?
+                                        .ok_or_else(|| MessageError::BadFormat("invalid array length".to_owned()))?
                                 }
                             }
                         }
                         ValueType::Fd => {
                             arg_size = quote! { 0 };
                             quote! {
-                                state.fds.pop().ok_or(MessageError::BadFormat)?
+                                state.fds.pop().ok_or_else(|| MessageError::BadFormat("no fd received".to_owned()))?
                             }
                         }
                     };
@@ -235,14 +237,14 @@ impl CodeBuilder {
                 quote! {
                     pub fn #fn_name #demarshaller_signature {
                         let object = protocol::#interface_struct::downcast(object)
-                            .expect("Demarshaller called with invalid object");
+                            .expect("demarshaller called with invalid object");
 
                         let mut __a = 0;
                         #(#extract_args)*
                         if __a == args.len() {
                             object.#fn_name(state, #(#args),*)
                         } else {
-                            Err(MessageError::BadFormat)
+                            Err(MessageError::BadFormat("argument array too long".to_owned()))
                         }
                     }
                 }
@@ -350,7 +352,7 @@ impl CodeBuilder {
                     }
                 });
 
-                let opcode = u16::try_from(opcode).expect("Opcode does not fit in u16");
+                let opcode = u16::try_from(opcode).expect("opcode does not fit in u16");
                 quote! {
                     pub fn #fn_name(
                         send_buf: &mut MessageBuf<Write>,
@@ -360,7 +362,9 @@ impl CodeBuilder {
                         let __len = 2 #( + #lengths)*;
                         let __buf = send_buf.allocate(__len)?;
                         __buf[0] = self_id.raw();
-                        let __msg_len = u16::try_from(__len * 4).map_err(|_| MessageError::TooLarge)?;
+                        // Cast is okay provided that send_buf allocation will fail
+                        // for large sizes.
+                        let __msg_len = __len as u16 * 4;
                         __buf[1] = u32::from(#opcode) | (u32::from(__msg_len) << 16);
                         let mut __i = 2;
                         #(#write_args)*
@@ -381,6 +385,7 @@ impl CodeBuilder {
                 }
 
                 impl protocol::#interface_struct {
+                    #[inline]
                     fn downcast(object: &mut Interface) -> Option<&mut Self> {
                         match object {
                             Interface::#interface_struct(v) => Some(v),
@@ -429,7 +434,7 @@ pub fn emit_stubs(protocol: &Protocol) -> TokenStream {
             let fn_name = format_ident!("handle_{}", request.name);
             quote! {
                 pub fn #fn_name(&mut self, _state: &mut DispatchState, #(#args),*) -> Result<(), MessageError> {
-                    todo!("{}::{} not yet implemented", #interface_name, #request_name)
+                    todo!("{}::{}", #interface_name, #request_name)
                 }
             }
         });
