@@ -140,6 +140,8 @@
 	specified name as the identifier.
       </description>
       <arg name="name" type="uint" summary="unique numeric name of the object"/>
+      <arg name="interface" type="string" summary="interface implemented by the object"/>
+      <arg name="version" type="uint" summary="interface version"/>
       <arg name="id" type="new_id" summary="bounded object"/>
     </request>
 
