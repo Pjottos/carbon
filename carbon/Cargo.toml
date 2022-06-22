@@ -14,5 +14,7 @@ slotmap = "1"
 fixed = "1"
 thiserror = "1"
 
+winit = "0.26"
+
 [build-dependencies]
 protocol-scanner = { path = "../protocol-scanner" }
