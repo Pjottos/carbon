@@ -1,6 +1,7 @@
 use crate::{gateway::registry::ObjectId, protocol::Interface};
 
 use nix::{
+    errno::Errno,
     sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags},
     unistd::close,
 };
@@ -64,6 +65,10 @@ impl MessageStream {
         let mut count = 0;
         let mut cmsg_buf = nix::cmsg_space!([RawFd; MAX_FDS_OUT]);
         loop {
+            if self.receive_buf.is_full() {
+                return Err(MessageError::OutOfMemory);
+            }
+
             match recvmsg::<()>(
                 self.stream_fd,
                 &mut [self.receive_buf.io_slice_mut()],
@@ -75,7 +80,11 @@ impl MessageStream {
                         // Stream is closed, assume that there are no whole messages
                         // still in the buffer since they should have been processed
                         // in the last invocation.
-                        break Ok(0);
+                        //
+                        // Note that we may have actually processed some messages,
+                        // but we must return 0 to communicate that the stream is closed
+                        // since, probably, no additional wakeups will be issued.
+                        return Ok(0);
                     }
 
                     self.receive_buf.grow(msg.bytes);
@@ -85,26 +94,19 @@ impl MessageStream {
                         }
                     }
                 }
-                Err(e) => break Err(io::Error::from(e).into()),
+                Err(Errno::EWOULDBLOCK) => break,
+                Err(e) => return Err(io::Error::from(e).into()),
             }
 
-            let should_read = self.receive_buf.is_full();
-            let new_count = self
+            count += self
                 .receive_buf
                 .deserialize_messages(&mut dispatcher, &mut self.send_buf)?;
-            count += new_count;
+        }
 
-            if new_count == 0 {
-                break if should_read {
-                    Err(MessageError::OutOfMemory)
-                } else {
-                    Err(io::Error::from(io::ErrorKind::WouldBlock).into())
-                };
-            } else if should_read {
-                continue;
-            }
-
-            break Ok(count);
+        if count == 0 {
+            Err(io::Error::from(io::ErrorKind::WouldBlock).into())
+        } else {
+            Ok(count)
         }
     }
 
@@ -129,6 +131,15 @@ impl MessageStream {
                 Ok(count) => {
                     total_count += count;
                     self.send_buf.fds.clear();
+                }
+                Err(Errno::EWOULDBLOCK) => {
+                    break if total_count == 0 {
+                        // Buffer length is not zero and we did not manage to write any bytes
+                        // so return WouldBlock.
+                        Err(io::Error::from(io::ErrorKind::WouldBlock))
+                    } else {
+                        Ok(total_count)
+                    };
                 }
                 Err(e) => break Err(e.into()),
             }
