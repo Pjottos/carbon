@@ -76,6 +76,8 @@ impl CodeBuilder {
             };
             use fixed::types::I24F8;
             use bytemuck::{cast_slice, cast_slice_mut};
+            use bitflags::bitflags;
+
             use std::os::unix::io::RawFd;
 
             pub type RequestDemarshaller = fn #demarshaller_signature;
@@ -99,38 +101,84 @@ impl CodeBuilder {
             let interface_struct = format_ident!("{}", interface.name.to_case(Case::Pascal));
 
             let enums = interface.enums.iter().map(|enum_| {
-                let name = format_ident!("{}", enum_.name.to_case(Case::Pascal));
+                let name_str = enum_.name.to_case(Case::Pascal);
+                let name = format_ident!("{}", name_str);
 
-                fn convert_variant_name(name: &str) -> Ident {
-                    let name = name.to_case(Case::Pascal);
+                let convert_variant_name = |name: &str| -> Ident {
+                    let case = if enum_.is_bitfield { Case::UpperSnake } else { Case::Pascal };
+                    let name = name.to_case(case);
                     match name.parse::<u32>() {
                         Ok(_) => format_ident!("U{}", name),
                         Err(_) => format_ident!("{}", name),
                     }
-                }
-                let entries = enum_.entries.iter().map(|(name, value)| {
-                    let name = convert_variant_name(name);
-                    quote! { #name = #value }
-                });
-                let match_entries = enum_.entries.iter().map(|(name, value)| {
-                    let name = convert_variant_name(name);
-                    quote! { #value => Ok(Self::#name) }
-                });
+                };
 
-                quote! {
-                    #[repr(u32)]
-                    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-                    pub enum #name {
-                        #(#entries),*
+                if enum_.is_bitfield {
+                    let entries = enum_.entries.iter().map(|(name, value)| {
+                        let name = convert_variant_name(name);
+                        quote! { const #name = #value; }
+                    });
+
+                    quote! {
+                        bitflags! {
+                            #[repr(transparent)]
+                            pub struct #name: u32 {
+                                #(#entries)*
+                            }
+                        }
+
+                        impl TryFrom<u32> for #name {
+                            type Error = MessageError;
+
+                            fn try_from(v: u32) -> Result<Self, Self::Error> {
+                                #name::from_bits(v)
+                                    .ok_or_else(|| MessageError::BadFormat(format!(
+                                        "{:08x} is not a valid value for bitfield {}",
+                                        v, #name_str,
+                                    )))
+                            }
+                        }
+
+                        impl From<#name> for u32 {
+                            fn from(v: #name) -> u32 {
+                                v.bits()
+                            }
+                        }
                     }
+                } else {
+                    let entries = enum_.entries.iter().map(|(name, value)| {
+                        let name = convert_variant_name(name);
+                        quote! { #name = #value }
+                    });
+                    let match_entries = enum_.entries.iter().map(|(name, value)| {
+                        let name = convert_variant_name(name);
+                        quote! { #value => Ok(Self::#name) }
+                    });
 
-                    impl TryFrom<u32> for #name {
-                        type Error = MessageError;
+                    quote! {
+                        #[repr(u32)]
+                        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+                        pub enum #name {
+                            #(#entries),*
+                        }
 
-                        fn try_from(v: u32) -> Result<Self, MessageError> {
-                            match v {
-                                #(#match_entries),*,
-                                _ => Err(MessageError::BadFormat(format!("{v} is not a valid value for enum #name"))),
+                        impl TryFrom<u32> for #name {
+                            type Error = MessageError;
+
+                            fn try_from(v: u32) -> Result<Self, Self::Error> {
+                                match v {
+                                    #(#match_entries),*,
+                                    _ => Err(MessageError::BadFormat(format!(
+                                        "{} is not a valid value for enum {}",
+                                        v, #name_str,
+                                    ))),
+                                }
+                            }
+                        }
+
+                        impl From<#name> for u32 {
+                            fn from(v: #name) -> u32 {
+                                v as u32
                             }
                         }
                     }
@@ -288,7 +336,7 @@ impl CodeBuilder {
                     let assign = match arg.value_type {
                         ValueType::I32 => quote! { __buf[__i] = #name as u32; },
                         ValueType::U32 => quote! { __buf[__i] = #name; },
-                        ValueType::Enum { .. } => quote! { __buf[__i] = #name as u32; },
+                        ValueType::Enum { .. } => quote! { __buf[__i] = #name.into(); },
                         ValueType::Fixed => quote! {
                             __buf[__i] = u32::from_ne_bytes(#name.to_ne_bytes());
                         },

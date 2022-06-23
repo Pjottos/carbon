@@ -13,6 +13,7 @@ num_enum = "0.5"
 slotmap = "1"
 fixed = "1"
 thiserror = "1"
+bitflags = "1"
 
 winit = "0.26"
 

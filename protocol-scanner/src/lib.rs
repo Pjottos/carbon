@@ -280,16 +280,21 @@ impl ProtocolParser {
     }
 
     fn create_cur_enum(&mut self, start: &BytesStart) {
-        let name = start
-            .attributes()
-            .find_map(|a| {
-                let a = a.unwrap();
-                (a.key == b"name").then(|| a.unescape_and_decode_value(&self.reader).unwrap())
-            })
-            .expect("expected 'name' attribute");
+        let mut name = None;
+        let mut is_bitfield = false;
+
+        for attribute in start.attributes() {
+            let attribute = attribute.unwrap();
+            match attribute.key {
+                b"name" => name = Some(attribute.unescape_and_decode_value(&self.reader).unwrap()),
+                b"bitfield" => is_bitfield = attribute.value.as_ref() == b"true",
+                _ => (),
+            }
+        }
 
         self.cur_enum = Some(Enum {
-            name,
+            name: name.expect("enum tag did not have name attribute"),
+            is_bitfield,
             entries: vec![],
         });
     }
@@ -442,6 +447,7 @@ struct Argument {
 #[derive(Debug)]
 struct Enum {
     name: String,
+    is_bitfield: bool,
     entries: Vec<(String, u32)>,
 }
 
