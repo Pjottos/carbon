@@ -1,6 +1,9 @@
-use super::{
-    message::MessageStream,
-    registry::{ClientObjects, GlobalObjectId},
+use crate::{
+    gateway::{
+        message::MessageStream,
+        registry::{ClientObjects, GlobalObjectId, ObjectId, ObjectRegistry},
+    },
+    protocol::Interface,
 };
 
 pub struct Client {
@@ -16,8 +19,14 @@ impl Client {
         }
     }
 
+    #[inline]
     pub fn stream_and_objects_mut(&mut self) -> (&mut MessageStream, &mut ClientObjects) {
         (&mut self.stream, &mut self.objects)
+    }
+
+    #[inline]
+    pub fn stream_mut(&mut self) -> &mut MessageStream {
+        &mut self.stream
     }
 }
 
@@ -54,5 +63,26 @@ impl Clients {
 
     pub fn get_mut(&mut self, id: u32) -> Option<&mut Client> {
         self.clients.get_mut(id as usize).and_then(Option::as_mut)
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Client> {
+        self.clients.iter_mut().filter_map(Option::as_mut)
+    }
+
+    pub fn find_interface_in_clients<'a, F>(
+        &'a mut self,
+        registry: &'a ObjectRegistry,
+        mut filter: F,
+    ) -> impl Iterator<Item = (&mut Client, ObjectId)> + 'a
+    where
+        F: FnMut(&Interface) -> bool + 'a,
+    {
+        self.iter_mut().filter_map(move |client| {
+            let res = client
+                .objects
+                .iter()
+                .find(|&(_, global_id)| registry.get(global_id).map_or(false, &mut filter));
+            res.map(|(id, _)| (client, id))
+        })
     }
 }

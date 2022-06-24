@@ -1,8 +1,11 @@
-use crate::{gateway::message::MessageError, protocol::*};
+use crate::{
+    gateway::{client::Clients, message::MessageError},
+    protocol::*,
+};
 
 use slotmap::SlotMap;
 
-use std::{fmt::Debug, marker::PhantomData, num::NonZeroU32};
+use std::{fmt::Debug, num::NonZeroU32};
 
 slotmap::new_key_type! { pub struct GlobalObjectId; }
 
@@ -54,10 +57,56 @@ impl ObjectRegistry {
             .map(|id| (id, self.get(id).unwrap()))
     }
 
-    pub fn make_object_global(&mut self, id: GlobalObjectId) {
-        if !self.globals.contains(&id) && self.objects.get(id).is_some() {
+    pub fn make_global(
+        &mut self,
+        id: GlobalObjectId,
+        clients: &mut Clients,
+    ) -> Result<(), MessageError> {
+        if self.globals.contains(&id) {
+            return Ok(());
+        }
+
+        if let Some(new_global) = self.get(id) {
+            for (client, id) in clients.find_interface_in_clients(self, |interface| {
+                matches!(interface, Interface::WlRegistry(_))
+            }) {
+                wl_registry::emit_global(
+                    client.stream_mut().send_buf_mut(),
+                    id,
+                    new_global.id(),
+                    new_global.name(),
+                    new_global.version(),
+                )?;
+            }
+
             self.globals.push(id);
         }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn remove_global(
+        &mut self,
+        id: GlobalObjectId,
+        clients: &mut Clients,
+    ) -> Result<(), MessageError> {
+        if let Some(idx) = self.globals.iter().position(|&g| g == id) {
+            let global = self.get(id).unwrap();
+            for (client, id) in clients.find_interface_in_clients(self, |interface| {
+                matches!(interface, Interface::WlRegistry(_))
+            }) {
+                wl_registry::emit_global_remove(
+                    client.stream_mut().send_buf_mut(),
+                    id,
+                    global.id(),
+                )?;
+            }
+
+            self.globals.swap_remove(idx);
+        }
+
+        Ok(())
     }
 
     #[inline]
@@ -94,42 +143,18 @@ impl ObjectRegistry {
 }
 
 #[repr(transparent)]
-// clippy bug?
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(PartialEq, Eq, Hash)]
-pub struct ObjectId<T> {
-    value: NonZeroU32,
-    phantom: PhantomData<T>,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectId(NonZeroU32);
 
-impl<T> ObjectId<T> {
+impl ObjectId {
     #[inline]
     pub fn new(raw: u32) -> Option<Self> {
-        NonZeroU32::new(raw).map(|value| Self {
-            value,
-            phantom: PhantomData,
-        })
+        NonZeroU32::new(raw).map(Self)
     }
 
     #[inline]
     pub fn raw(self) -> u32 {
-        self.value.get()
-    }
-}
-
-// Can't derive because then the type argument needs to implement Clone as well
-impl<T> Clone for ObjectId<T> {
-    fn clone(&self) -> Self {
-        Self {
-            value: self.value,
-            phantom: PhantomData,
-        }
-    }
-}
-impl<T> Copy for ObjectId<T> {}
-impl<T> Debug for ObjectId<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ObjectId").field(&self.value).finish()
+        self.0.get()
     }
 }
 
@@ -146,17 +171,17 @@ impl ClientObjects {
     }
 
     #[inline]
-    pub fn get<T>(&self, id: ObjectId<T>) -> Option<GlobalObjectId> {
-        self.objects.get(id.value.get() as usize).and_then(|id| *id)
+    pub fn get(&self, id: ObjectId) -> Option<GlobalObjectId> {
+        self.objects.get(id.0.get() as usize).and_then(|id| *id)
     }
 
     #[inline]
-    pub fn register<T>(
+    pub fn register(
         &mut self,
-        id: ObjectId<T>,
+        id: ObjectId,
         global_id: Option<GlobalObjectId>,
     ) -> Result<(), MessageError> {
-        let idx = id.value.get() as usize;
+        let idx = id.0.get() as usize;
         if idx == self.objects.len() {
             self.objects.push(global_id);
             Ok(())
@@ -172,5 +197,13 @@ impl ClientObjects {
                 Err(MessageError::InvalidObject)
             }
         }
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = (ObjectId, GlobalObjectId)> + '_ {
+        self.objects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| o.map(|o| (ObjectId::new(i as u32).unwrap(), o)))
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     gateway::{message::MessageError, registry::ObjectId},
-    protocol::{generated::*, wayland::*, DispatchState},
+    protocol::{generated::*, DispatchState},
 };
 pub struct XdgWmBase;
 impl XdgWmBase {
@@ -10,7 +10,7 @@ impl XdgWmBase {
     pub fn handle_create_positioner(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<XdgPositioner>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -21,8 +21,8 @@ impl XdgWmBase {
     pub fn handle_get_xdg_surface(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<XdgSurface>,
-        _surface: ObjectId<WlSurface>,
+        _id: ObjectId,
+        _surface: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgWmBase", "get_xdg_surface")
     }
@@ -133,16 +133,16 @@ impl XdgSurface {
     pub fn handle_get_toplevel(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<XdgToplevel>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgSurface", "get_toplevel")
     }
     pub fn handle_get_popup(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<XdgPopup>,
-        _parent: Option<ObjectId<XdgSurface>>,
-        _positioner: ObjectId<XdgPositioner>,
+        _id: ObjectId,
+        _parent: Option<ObjectId>,
+        _positioner: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgSurface", "get_popup")
     }
@@ -176,7 +176,7 @@ impl XdgToplevel {
     pub fn handle_set_parent(
         &mut self,
         _state: &mut DispatchState,
-        _parent: Option<ObjectId<XdgToplevel>>,
+        _parent: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgToplevel", "set_parent")
     }
@@ -197,7 +197,7 @@ impl XdgToplevel {
     pub fn handle_show_window_menu(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
         _x: i32,
         _y: i32,
@@ -211,7 +211,7 @@ impl XdgToplevel {
     pub fn handle_move(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgToplevel", "move")
@@ -219,7 +219,7 @@ impl XdgToplevel {
     pub fn handle_resize(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
         _edges: xdg_toplevel::ResizeEdge,
     ) -> Result<(), MessageError> {
@@ -257,7 +257,7 @@ impl XdgToplevel {
     pub fn handle_set_fullscreen(
         &mut self,
         _state: &mut DispatchState,
-        _output: Option<ObjectId<WlOutput>>,
+        _output: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -287,7 +287,7 @@ impl XdgPopup {
     pub fn handle_grab(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgPopup", "grab")
@@ -295,7 +295,7 @@ impl XdgPopup {
     pub fn handle_reposition(
         &mut self,
         _state: &mut DispatchState,
-        _positioner: ObjectId<XdgPositioner>,
+        _positioner: ObjectId,
         _token: u32,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "XdgPopup", "reposition")

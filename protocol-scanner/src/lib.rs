@@ -504,25 +504,11 @@ impl ValueType {
                 quote! { #interface::#name }
             }
             ValueType::Fixed => quote! { I24F8 },
-            ValueType::ObjectId {
-                interface,
-                optional,
-            } => {
-                let id_type = if let Some(interface) = interface.as_ref() {
-                    let interface = format_ident!("{}", interface.to_case(Case::Pascal));
-                    if is_stub {
-                        quote! { ObjectId<#interface> }
-                    } else {
-                        quote! { ObjectId<protocol::#interface> }
-                    }
-                } else {
-                    quote! { ObjectId<Interface> }
-                };
-
+            ValueType::ObjectId { optional, .. } => {
                 if *optional {
-                    quote! { Option<#id_type> }
+                    quote! { Option<ObjectId> }
                 } else {
-                    quote! { #id_type }
+                    quote! { ObjectId }
                 }
             }
             ValueType::String { optional } => {

@@ -11,7 +11,7 @@ impl WlDisplay {
     pub fn handle_sync(
         &mut self,
         state: &mut DispatchState,
-        callback: ObjectId<WlCallback>,
+        callback: ObjectId,
     ) -> Result<(), MessageError> {
         state.objects.register(callback, None)?;
         wl_callback::emit_done(state.send_buf, callback, 0)?;
@@ -22,7 +22,7 @@ impl WlDisplay {
     pub fn handle_get_registry(
         &mut self,
         state: &mut DispatchState,
-        registry: ObjectId<WlRegistry>,
+        registry: ObjectId,
     ) -> Result<(), MessageError> {
         state
             .objects
@@ -50,7 +50,7 @@ impl WlRegistry {
         name: u32,
         interface: &str,
         version: u32,
-        id: ObjectId<Interface>,
+        id: ObjectId,
     ) -> Result<(), MessageError> {
         let (global_id, _) = state
             .registry
@@ -73,7 +73,7 @@ impl WlCompositor {
     pub fn handle_create_surface(
         &mut self,
         state: &mut DispatchState,
-        id: ObjectId<WlSurface>,
+        id: ObjectId,
     ) -> Result<(), MessageError> {
         let surface = WlSurface;
         let global_id = state.registry.insert(Interface::WlSurface(surface));
@@ -88,7 +88,7 @@ impl WlCompositor {
     pub fn handle_create_region(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlRegion>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -104,7 +104,7 @@ impl WlShmPool {
     pub fn handle_create_buffer(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlBuffer>,
+        _id: ObjectId,
         _offset: i32,
         _width: i32,
         _height: i32,
@@ -132,7 +132,7 @@ impl WlShm {
     pub fn handle_create_pool(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlShmPool>,
+        _id: ObjectId,
         _fd: RawFd,
         _size: i32,
     ) -> Result<(), MessageError> {
@@ -213,9 +213,9 @@ impl WlDataDevice {
     pub fn handle_start_drag(
         &mut self,
         _state: &mut DispatchState,
-        _source: Option<ObjectId<WlDataSource>>,
-        _origin: ObjectId<WlSurface>,
-        _icon: Option<ObjectId<WlSurface>>,
+        _source: Option<ObjectId>,
+        _origin: ObjectId,
+        _icon: Option<ObjectId>,
         _serial: u32,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlDataDevice", "start_drag")
@@ -224,7 +224,7 @@ impl WlDataDevice {
     pub fn handle_set_selection(
         &mut self,
         _state: &mut DispatchState,
-        _source: Option<ObjectId<WlDataSource>>,
+        _source: Option<ObjectId>,
         _serial: u32,
     ) -> Result<(), MessageError> {
         todo!(
@@ -244,7 +244,7 @@ impl WlDataDeviceManager {
     pub fn handle_create_data_source(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlDataSource>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -256,8 +256,8 @@ impl WlDataDeviceManager {
     pub fn handle_get_data_device(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlDataDevice>,
-        _seat: ObjectId<WlSeat>,
+        _id: ObjectId,
+        _seat: ObjectId,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -272,8 +272,8 @@ impl WlShell {
     pub fn handle_get_shell_surface(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlShellSurface>,
-        _surface: ObjectId<WlSurface>,
+        _id: ObjectId,
+        _surface: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlShell", "get_shell_surface")
     }
@@ -292,7 +292,7 @@ impl WlShellSurface {
     pub fn handle_move(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlShellSurface", "move")
@@ -301,7 +301,7 @@ impl WlShellSurface {
     pub fn handle_resize(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
         _edges: wl_shell_surface::Resize,
     ) -> Result<(), MessageError> {
@@ -319,7 +319,7 @@ impl WlShellSurface {
     pub fn handle_set_transient(
         &mut self,
         _state: &mut DispatchState,
-        _parent: ObjectId<WlSurface>,
+        _parent: ObjectId,
         _x: i32,
         _y: i32,
         _flags: wl_shell_surface::Transient,
@@ -336,7 +336,7 @@ impl WlShellSurface {
         _state: &mut DispatchState,
         _method: wl_shell_surface::FullscreenMethod,
         _framerate: u32,
-        _output: Option<ObjectId<WlOutput>>,
+        _output: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -349,9 +349,9 @@ impl WlShellSurface {
     pub fn handle_set_popup(
         &mut self,
         _state: &mut DispatchState,
-        _seat: ObjectId<WlSeat>,
+        _seat: ObjectId,
         _serial: u32,
-        _parent: ObjectId<WlSurface>,
+        _parent: ObjectId,
         _x: i32,
         _y: i32,
         _flags: wl_shell_surface::Transient,
@@ -362,7 +362,7 @@ impl WlShellSurface {
     pub fn handle_set_maximized(
         &mut self,
         _state: &mut DispatchState,
-        _output: Option<ObjectId<WlOutput>>,
+        _output: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -397,7 +397,7 @@ impl WlSurface {
     pub fn handle_attach(
         &mut self,
         _state: &mut DispatchState,
-        _buffer: Option<ObjectId<WlBuffer>>,
+        _buffer: Option<ObjectId>,
         _x: i32,
         _y: i32,
     ) -> Result<(), MessageError> {
@@ -418,7 +418,7 @@ impl WlSurface {
     pub fn handle_frame(
         &mut self,
         _state: &mut DispatchState,
-        _callback: ObjectId<WlCallback>,
+        _callback: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSurface", "frame")
     }
@@ -426,7 +426,7 @@ impl WlSurface {
     pub fn handle_set_opaque_region(
         &mut self,
         _state: &mut DispatchState,
-        _region: Option<ObjectId<WlRegion>>,
+        _region: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -438,7 +438,7 @@ impl WlSurface {
     pub fn handle_set_input_region(
         &mut self,
         _state: &mut DispatchState,
-        _region: Option<ObjectId<WlRegion>>,
+        _region: Option<ObjectId>,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -504,7 +504,7 @@ impl WlSeat {
     pub fn handle_get_pointer(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlPointer>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSeat", "get_pointer")
     }
@@ -512,7 +512,7 @@ impl WlSeat {
     pub fn handle_get_keyboard(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlKeyboard>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSeat", "get_keyboard")
     }
@@ -520,7 +520,7 @@ impl WlSeat {
     pub fn handle_get_touch(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlTouch>,
+        _id: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSeat", "get_touch")
     }
@@ -536,7 +536,7 @@ impl WlPointer {
         &mut self,
         _state: &mut DispatchState,
         _serial: u32,
-        _surface: Option<ObjectId<WlSurface>>,
+        _surface: Option<ObjectId>,
         _hotspot_x: i32,
         _hotspot_y: i32,
     ) -> Result<(), MessageError> {
@@ -607,9 +607,9 @@ impl WlSubcompositor {
     pub fn handle_get_subsurface(
         &mut self,
         _state: &mut DispatchState,
-        _id: ObjectId<WlSubsurface>,
-        _surface: ObjectId<WlSurface>,
-        _parent: ObjectId<WlSurface>,
+        _id: ObjectId,
+        _surface: ObjectId,
+        _parent: ObjectId,
     ) -> Result<(), MessageError> {
         todo!(
             "{}::{} not yet implemented",
@@ -637,7 +637,7 @@ impl WlSubsurface {
     pub fn handle_place_above(
         &mut self,
         _state: &mut DispatchState,
-        _sibling: ObjectId<WlSurface>,
+        _sibling: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSubsurface", "place_above")
     }
@@ -645,7 +645,7 @@ impl WlSubsurface {
     pub fn handle_place_below(
         &mut self,
         _state: &mut DispatchState,
-        _sibling: ObjectId<WlSurface>,
+        _sibling: ObjectId,
     ) -> Result<(), MessageError> {
         todo!("{}::{} not yet implemented", "WlSubsurface", "place_below")
     }

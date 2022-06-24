@@ -1,4 +1,4 @@
-use crate::{gateway::registry::ObjectId, protocol::Interface};
+use crate::gateway::registry::ObjectId;
 
 use nix::{
     errno::Errno,
@@ -52,10 +52,15 @@ impl MessageStream {
         }
     }
 
+    #[inline]
+    pub fn send_buf_mut(&mut self) -> &mut MessageBuf<Write> {
+        &mut self.send_buf
+    }
+
     pub fn receive<D>(&mut self, mut dispatcher: D) -> Result<usize, MessageError>
     where
         D: FnMut(
-            ObjectId<Interface>,
+            ObjectId,
             u16,
             &[u32],
             FdSource,
@@ -224,7 +229,7 @@ impl MessageBuf<Read> {
     ) -> Result<usize, MessageError>
     where
         D: FnMut(
-            ObjectId<Interface>,
+            ObjectId,
             u16,
             &[u32],
             FdSource,

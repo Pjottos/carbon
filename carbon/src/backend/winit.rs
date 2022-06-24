@@ -15,13 +15,20 @@ use winit::{
     window::WindowBuilder,
 };
 
-use std::{io, mem::drop, os::unix::io::RawFd, sync::mpsc, thread};
+use std::{
+    io,
+    mem::drop,
+    os::unix::io::RawFd,
+    sync::mpsc::{self, TryRecvError},
+    thread,
+};
 
 pub struct Winit {
     input_rx: mpsc::Receiver<DeviceEvent>,
     input_fd: RawFd,
     proxy: EventLoopProxy<BackendDropped>,
     seat_id: Option<SeatId>,
+    closed: bool,
 }
 
 impl Drop for Winit {
@@ -45,6 +52,7 @@ impl Winit {
             input_fd,
             proxy,
             seat_id: None,
+            closed: false,
         }
     }
 }
@@ -55,6 +63,10 @@ impl Backend for Winit {
     }
 
     fn drain_input(&mut self, sink: &mut InputSink) -> io::Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+
         let seat_id = *self
             .seat_id
             .get_or_insert_with(|| sink.create_seat(Capability::KEYBOARD | Capability::POINTER));
@@ -62,19 +74,28 @@ impl Backend for Winit {
         let mut counter = 0u64.to_ne_bytes();
         read(self.input_fd, &mut counter)?;
 
-        for event in self.input_rx.try_iter() {
-            match event {
-                DeviceEvent::MouseMotion { delta } => (),
-                DeviceEvent::MouseWheel { delta } => (),
-                DeviceEvent::Motion { axis, value } => (),
-                DeviceEvent::Button { button, state } => match button {
-                    1 | 0x110 => log::debug!("left"),
-                    2 | 0x112 => log::debug!("middle"),
-                    3 | 0x111 => log::debug!("right"),
-                    _ => log::warn!("Unknown button event: {:04x} {:?}", button, state),
+        loop {
+            match self.input_rx.try_recv() {
+                Ok(event) => match event {
+                    DeviceEvent::MouseMotion { delta } => (),
+                    DeviceEvent::MouseWheel { delta } => (),
+                    DeviceEvent::Motion { axis, value } => (),
+                    DeviceEvent::Button { button, state } => match button {
+                        1 | 0x110 => log::debug!("left"),
+                        2 | 0x112 => log::debug!("middle"),
+                        3 | 0x111 => log::debug!("right"),
+                        _ => log::warn!("Unknown button event: {:04x} {:?}", button, state),
+                    },
+                    DeviceEvent::Key(key) => (),
+                    _ => (),
                 },
-                DeviceEvent::Key(key) => (),
-                _ => (),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    sink.destroy_seat(seat_id);
+                    self.seat_id = None;
+                    self.closed = true;
+                    break;
+                }
             }
         }
 
@@ -126,4 +147,8 @@ fn run_event_loop(
             window.take();
         }
     });
+
+    // Cause poll for input to destroy the seat
+    // Do nothing if the input_fd has been closed
+    let _ = write(input_fd, &1u64.to_ne_bytes());
 }

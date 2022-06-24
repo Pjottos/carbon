@@ -19,7 +19,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
 use std::{env, fs, io, os::unix::prelude::*, path::PathBuf};
 
-mod client;
+pub mod client;
 pub mod message;
 pub mod registry;
 
@@ -290,6 +290,7 @@ impl<B: Backend> Gateway<B> {
                 let mut sink = InputSink {
                     state: &mut self.input_state,
                     registry: &mut self.registry,
+                    clients: &mut self.clients,
                 };
                 match self.backend.drain_input(&mut sink) {
                     Ok(_) => (),

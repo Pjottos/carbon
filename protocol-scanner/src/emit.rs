@@ -404,7 +404,7 @@ impl CodeBuilder {
                 quote! {
                     pub fn #fn_name(
                         send_buf: &mut MessageBuf<Write>,
-                        self_id: ObjectId<protocol::#interface_struct>,
+                        self_id: ObjectId,
                         #(#args),*
                     ) -> Result<(), MessageError> {
                         let __len = 2 #( + #lengths)*;

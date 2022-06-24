@@ -1,35 +1,28 @@
 use crate::{
-    gateway::registry::ObjectRegistry,
+    gateway::{
+        client::Clients,
+        registry::{GlobalObjectId, ObjectRegistry},
+    },
     protocol::{wl_seat::Capability, Interface, WlSeat},
 };
 
-pub struct InputState {
-    seats: Vec<Option<Seat>>,
-}
+use slotmap::{new_key_type, SlotMap};
 
-#[derive(Debug, Clone, Copy)]
-pub struct SeatId(u32);
+new_key_type! { pub struct SeatId; }
 
 pub struct Seat {
     capabilities: Capability,
+    object_id: GlobalObjectId,
+}
+
+pub struct InputState {
+    seats: SlotMap<SeatId, Seat>,
 }
 
 impl InputState {
     pub fn new() -> Self {
-        Self { seats: vec![] }
-    }
-
-    fn insert_seat(&mut self, seat: Seat) -> SeatId {
-        match self.seats.iter_mut().enumerate().find(|(_, e)| e.is_none()) {
-            Some((idx, entry)) => {
-                *entry = Some(seat);
-                SeatId(idx as u32)
-            }
-            None => {
-                let idx = self.seats.len();
-                self.seats.push(Some(seat));
-                SeatId(idx as u32)
-            }
+        Self {
+            seats: SlotMap::with_key(),
         }
     }
 }
@@ -37,19 +30,32 @@ impl InputState {
 pub struct InputSink<'a> {
     pub state: &'a mut InputState,
     pub registry: &'a mut ObjectRegistry,
+    pub clients: &'a mut Clients,
 }
 
 impl<'a> InputSink<'a> {
     pub fn create_seat(&mut self, capabilities: Capability) -> SeatId {
-        let seat = Seat { capabilities };
-        let seat_id = self.state.insert_seat(seat);
+        let seat = Seat {
+            capabilities,
+            object_id: GlobalObjectId::default(),
+        };
+        let seat_id = self.state.seats.insert(seat);
 
         let wl_seat = WlSeat { id: seat_id };
         let object_id = self.registry.insert(Interface::WlSeat(wl_seat));
-        self.registry.make_object_global(object_id);
-
-        log::warn!("TODO: broadcast new seat to connected clients");
+        self.registry
+            .make_global(object_id, self.clients)
+            .expect("send buffer full");
+        self.state.seats.get_mut(seat_id).unwrap().object_id = object_id;
 
         seat_id
+    }
+
+    pub fn destroy_seat(&mut self, id: SeatId) {
+        if let Some(seat) = self.state.seats.remove(id) {
+            self.registry
+                .remove_global(seat.object_id, self.clients)
+                .expect("send buffer full");
+        }
     }
 }
