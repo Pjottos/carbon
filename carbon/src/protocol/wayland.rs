@@ -1,5 +1,6 @@
 use crate::{
     gateway::{message::MessageError, registry::ObjectId},
+    input::SeatId,
     protocol::{generated::*, DispatchState, Interface},
 };
 
@@ -495,7 +496,10 @@ impl WlSurface {
     }
 }
 
-pub struct WlSeat;
+pub struct WlSeat {
+    pub id: SeatId,
+}
+
 impl WlSeat {
     pub fn handle_get_pointer(
         &mut self,

@@ -2,6 +2,7 @@
 
 mod backend;
 mod gateway;
+mod input;
 mod protocol;
 
 fn main() {
@@ -9,8 +10,8 @@ fn main() {
 
     log::info!("Starting carbon...");
 
-    let _backend = backend::Winit::new();
+    let backend = backend::Winit::new();
 
-    let mut gateway = gateway::Gateway::new();
+    let mut gateway = gateway::Gateway::new(backend);
     gateway.run();
 }

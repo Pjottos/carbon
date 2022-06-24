@@ -24,7 +24,6 @@ impl ObjectRegistry {
             objects.insert(Some(Interface::WlCompositor(WlCompositor))),
             objects.insert(Some(Interface::WlShm(WlShm))),
             objects.insert(Some(Interface::WlDataDeviceManager(WlDataDeviceManager))),
-            objects.insert(Some(Interface::WlSeat(WlSeat))),
             objects.insert(Some(Interface::WlSubcompositor(WlSubcompositor))),
             objects.insert(Some(Interface::XdgWmBase(XdgWmBase))),
         ];
@@ -53,6 +52,12 @@ impl ObjectRegistry {
             .iter()
             .copied()
             .map(|id| (id, self.get(id).unwrap()))
+    }
+
+    pub fn make_object_global(&mut self, id: GlobalObjectId) {
+        if !self.globals.contains(&id) && self.objects.get(id).is_some() {
+            self.globals.push(id);
+        }
     }
 
     #[inline]

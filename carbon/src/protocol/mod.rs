@@ -9,8 +9,16 @@ mod generated;
 pub use generated::Interface;
 
 mod wayland;
+pub use generated::{
+    wl_buffer, wl_callback, wl_compositor, wl_data_device, wl_data_device_manager, wl_data_offer,
+    wl_data_source, wl_display, wl_keyboard, wl_output, wl_pointer, wl_region, wl_registry,
+    wl_seat, wl_shell, wl_shell_surface, wl_shm, wl_shm_pool, wl_subcompositor, wl_subsurface,
+    wl_surface, wl_touch,
+};
 pub use wayland::*;
+
 mod xdg_shell;
+pub use generated::{xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base};
 pub use xdg_shell::*;
 
 impl Interface {
